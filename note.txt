@@ -1,0 +1,17 @@
+cách down model llama-2 và implement trên python
+
+1. tạo tk trên huggingface https://huggingface.co/join
+anhkhoavippro
+anhkhoagps@gmail.com
+Phamanhkhoa12151998
+
+2. tạo tk meta AI (phải trùng với huggingface) https://www.meta.com/de-de/help/quest/articles/accounts/account-settings-and-management/set-up-meta-account-meta-quest/
+anhkhoagps@gmail.com
+khoa9898
+
+3. submit để xin licience để đc dùng model llama-2 https://huggingface.co/meta-llama/Llama-2-7b-chat-hf
+
+4. tạo token access cho huggingface chọn write https://huggingface.co/settings/tokens
+
+5. dùng lệnh terminal huggingface-cli login để add access token
+
