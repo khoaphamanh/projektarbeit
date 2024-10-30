@@ -17,3 +17,7 @@ khoa9898
 
 
 Data down load https://www2.ie.tsinghua.edu.cn/rrml/Resources.html
+Total number of instances: 22368
+Total number of features: 46
+Number of categorical features (integer values): 31
+Number of continuous features (float values): 15
