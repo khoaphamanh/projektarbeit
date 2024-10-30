@@ -15,3 +15,5 @@ khoa9898
 
 5. dùng lệnh terminal huggingface-cli login để add access token
 
+
+Data down load https://www2.ie.tsinghua.edu.cn/rrml/Resources.html
