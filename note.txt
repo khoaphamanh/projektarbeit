@@ -15,9 +15,52 @@ khoa9898
 
 5. dùng lệnh terminal huggingface-cli login để add access token
 
+# Data
 
+## High speed train (HST) breaking system
 Data down load https://www2.ie.tsinghua.edu.cn/rrml/Resources.html
+không có đơn vị
 Total number of instances: 22368
 Total number of features: 46
 Number of categorical features (integer values): 31
 Number of continuous features (float values): 15
+Number of instances in each label:
+label
+0    21979
+1      389
+
+trong paper nói có 44 features, 21 continuousm, 22 categorical, chỉ dùng 39 features, downsampling xuống còn 300 samples, 150 0, 150 1
+
+# Tennessee Eastman Process (TEP) Dataset
+
+
+# Model
+mất rất nh time để load checkpoint, giải pháp là down về dưới dạng .pth của pytorch để load nhanh hơn
+cấu trúc model:
+model: LlamaForCausalLM(
+  (model): LlamaModel(
+    (embed_tokens): Embedding(32000, 4096)
+    (layers): ModuleList(
+      (0-31): 32 x LlamaDecoderLayer(
+        (self_attn): LlamaSdpaAttention(
+          (q_proj): Linear(in_features=4096, out_features=4096, bias=False)
+          (k_proj): Linear(in_features=4096, out_features=4096, bias=False)
+          (v_proj): Linear(in_features=4096, out_features=4096, bias=False)
+          (o_proj): Linear(in_features=4096, out_features=4096, bias=False)
+          (rotary_emb): LlamaRotaryEmbedding()
+        )
+        (mlp): LlamaMLP(
+          (gate_proj): Linear(in_features=4096, out_features=11008, bias=False)
+          (up_proj): Linear(in_features=4096, out_features=11008, bias=False)
+          (down_proj): Linear(in_features=11008, out_features=4096, bias=False)
+          (act_fn): SiLU()
+        )
+        (input_layernorm): LlamaRMSNorm((4096,), eps=1e-05)
+        (post_attention_layernorm): LlamaRMSNorm((4096,), eps=1e-05)
+      )
+    )
+    (norm): LlamaRMSNorm((4096,), eps=1e-05)
+    (rotary_emb): LlamaRotaryEmbedding()
+  )
+  (lm_head): Linear(in_features=4096, out_features=32000, bias=False)
+)
