@@ -10,29 +10,18 @@ name_hst = "HST.csv"
 name_tep_dir = "TEP"
 
 # name tep for each part of the data
-name_tep = ["train_normal.csv", "train_anomaly", "test_normal", "test_anomaly"]
-
-
-# function to download .csv file given url
-def download_file(url, output_path):
-
-    # download the file in this case is .csv file
-    try:
-        # Send a request to the URL
-        response = requests.get(url)
-
-        # Save the CSV file
-        with open(output_path, "wb") as file:
-            file.write(response.content)
-
-        print(f"CSV file downloaded successfully: {output_path}")
-
-    except requests.exceptions.RequestException as e:
-        print(f"Failed to download CSV file: {e}")
+tep_list = [
+    "test_normal.csv",
+    "train_normal.csv",
+    "test_anomaly.csv",
+    "train_anomaly.csv",
+]
 
 
 # function to donwload directory as .zip file, und zip and save it as .csv from RData
-def download_and_extract_zip(url, output_path):
+def download_and_extract_zip(url, output_path, tep_list=None):
+
+    # download zip directory
     try:
         # Send a request to the URL
         response = requests.get(url, stream=True)
@@ -58,40 +47,80 @@ def download_and_extract_zip(url, output_path):
     except zipfile.BadZipFile:
         print(f"Failed to extract: Not a valid ZIP file")
 
+    # convert from RData to .csv
+    # Enable automatic conversion between R and pandas data frames
+    pandas2ri.activate()
 
-def download_data_convert_csv(name_data, url=None, name_tep_csv=None):
+    # Load the .RData file
+    r_data_path = "TEP/TEP_FaultFree_Training.RData"
+    robjects.r["load"](r_data_path)
 
-    # data directory path
+    # List all objects in the R environment to find the data frame name
+    object_names = list(robjects.r.objects())
+    print("Objects in the .RData file:", object_names)
+
+    # Assuming the data frame is named 'df' (replace 'df' with the actual name found in object_names)
+    # Replace 'df' with the correct object name from object_names list if it is different
+    df_name = object_names[
+        0
+    ]  # Use the first object name or replace with the correct one if you know it
+    df = robjects.r[df_name]
+
+    # Convert to a pandas DataFrame
+    df = pandas2ri.rpy2py(df)
+
+    # Save the pandas DataFrame to CSV
+    df.to_csv("test.csv", index=False)
+
+    print("Data saved to test.csv")
+
+
+# function to download .csv file given url
+def download_file(url, output_path):
+    try:
+        response = requests.get(url)
+        response.raise_for_status()  # Check if the request was successful
+
+        with open(output_path, "wb") as file:
+            file.write(response.content)
+
+        print(f"CSV file downloaded successfully: {output_path}")
+    except requests.exceptions.RequestException as e:
+        print(f"Failed to download CSV file: {e}")
+
+
+def download_data_convert_csv(name_data, url=None, tep_list=None):
+
+    # Absolute path to current directory
     data_dir_path = os.path.dirname(os.path.abspath(__file__))
 
-    # download data files and save it to data folder. HST data as .csv and TEP data as
+    # Full path to the data (csv file or directory)
     name_data_path = os.path.join(data_dir_path, name_data)
 
-    # check if files or directory available given name_data_path
+    # check data tep in .csv
+    if tep_list is not None:
+        tep_list = [os.path.join(data_dir_path, name_data_path, i) for i in tep_list]
+        tep_list = [os.path.exists(i) for i in tep_list]
+        print("tep_list:", tep_list)
+
+    # Check if the path exists
     if not os.path.exists(name_data_path):
 
-        # check if a file .csv given name_data_path
-        if not os.path.isfile(name_data_path):
-
-            # download .csv file from cloud driver
+        # If it doesn't exist, determine whether it's a file or a directory
+        if name_data.endswith(".csv"):
+            # If it's a CSV, download it
             download_file(url=url, output_path=name_data_path)
-
-        # check if a directory TEP given name_data_path
-        elif not os.path.isdir(name_data_path):
-
-            # download the TEP directory
+        else:
+            # If it's not a CSV, assume it's a ZIP file to be extracted as a directory
             download_and_extract_zip(url=url, output_path=name_data_path)
-            # #check if all .csv file tep available
-            # check_csv_tep = [os.path.exists(i) for i in name_tep_csv]
 
-            # if not all(check_csv_tep):
-
+    elif os.path.exists(name_data_path) and not all(tep_list):
+        1
     else:
-        print("{} is already downloaded".format(name_data_path))
+        print(f"{name_data_path} is already downloaded")
 
 
 if __name__ == "__main__":
-
     # link hst (direct download from seafile)
     url_hst = "https://seafile.cloud.uni-hannover.de/f/23780066a22244899c94/?dl=1"
     download_data_convert_csv(
@@ -101,7 +130,4 @@ if __name__ == "__main__":
 
     # link TEP
     url_tep = "https://seafile.cloud.uni-hannover.de/f/98107a4c284f481eb6c0/?dl=1"
-    download_data_convert_csv(
-        name_data=name_tep_dir,
-        url=url_tep,
-    )
+    download_data_convert_csv(name_data=name_tep_dir, url=url_tep, tep_list=tep_list)
