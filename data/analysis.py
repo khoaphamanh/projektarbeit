@@ -8,9 +8,7 @@ class DataAnalysis:
     def __init__(self, data_name):
         self.data_name = data_name
         self.data_dir_path = os.path.dirname(os.path.abspath(__file__))
-        # print("self.data_dir_path", self.data_dir_path)
         self.data_path = os.path.join(self.data_dir_path, self.data_name)
-        # print("self.data_path", self.data_path)
 
     def check_data(self):
         # check if data name a file (True) or a directory (False)
@@ -18,7 +16,7 @@ class DataAnalysis:
             return True
         return False
 
-    def analysis(self, print_out=False):
+    def analysis(self, extracted_label=None, print_out=False):
         # analysis data based on given data name (check if HST or TEP)
         check = self.check_data()
         if check is True:
@@ -26,9 +24,11 @@ class DataAnalysis:
         else:
             tep_data = sorted(i for i in os.listdir(self.data_path) if ".csv" in i)
             for tep in tep_data:
-                self.csv_analysis(csv_name=tep, print_out=True)
+                self.csv_analysis(
+                    csv_name=tep, extracted_label=extracted_label, print_out=True
+                )
 
-    def csv_analysis(self, csv_name=None, print_out=False):
+    def csv_analysis(self, csv_name=None, extracted_label=None, print_out=False):
 
         # dict analysis
         dict_analysis = {}
@@ -39,7 +39,6 @@ class DataAnalysis:
             if csv_name is None
             else os.path.join(self.data_path, csv_name)
         )
-        print("data_path:", data_path)
         df = pd.read_csv(data_path)
 
         # name of the data csv
@@ -54,7 +53,19 @@ class DataAnalysis:
             target = df.iloc[:, -1]
         else:
             features = df.iloc[:, 1:]
+            print("features len:", len(features))
             target = df.iloc[:, 0]
+            print("target len:", len(target))
+            # print("target:", target)
+
+        # extract label
+        if extracted_label is not None:
+            index_extracted_label = target.isin(extracted_label)
+            # print("index_extracted_label:", index_extracted_label)
+            features = features[index_extracted_label]
+            # print("features len:", len(features))
+            target = target[index_extracted_label]
+            # print("target len:", len(target))
 
         # calculate the number of unique label
         dict_analysis["num_unique_label"] = target.nunique()
@@ -86,16 +97,16 @@ class DataAnalysis:
 
         # Calculate the number of features and instances
         num_features = len(features.columns)
-        num_instances = len(df)
+        num_instances = len(features)
 
         dict_analysis["num_features"] = num_features
         dict_analysis["num_instances"] = num_instances
 
         # print out the analysis
         if print_out:
-            print()
             for k, v in dict_analysis.items():
                 print(k, "", v)
+            print()
 
         return dict_analysis
 
@@ -104,10 +115,9 @@ if __name__ == "__main__":
 
     data_name = "HST.csv"
     hst = DataAnalysis(data_name)
-    data_name = hst.data_name
     hst.analysis(print_out=True)
 
     data_name = "TEP"
     tep = DataAnalysis(data_name)
-    data_name = hst.data_name
-    tep.analysis(print_out=True)
+    extracted_label = [0, 1, 4, 5]
+    tep.analysis(extracted_label=extracted_label, print_out=True)
