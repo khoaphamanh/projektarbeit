@@ -37,6 +37,7 @@ Data có Documentation
 Mỗi File sẽ có một Object tương ứng và dùng index để giải nén từ RData sang .csv
 
 # Model
+link github: https://github.com/meta-llama/llama?tab=readme-ov-file
 mất rất nh time để load checkpoint, giải pháp là down về dưới dạng .pth của pytorch để load nhanh hơn
 cấu trúc model:
 model: LlamaForCausalLM(
