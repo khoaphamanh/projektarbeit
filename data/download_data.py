@@ -133,7 +133,6 @@ def download_data_convert_csv(name_data, url=None, tep_list=None):
         elif tep_list is not None:
             for i in tep_list:
                 print(f"{i} is already downloaded")
-    print()
 
 
 # download data HST and TEP
