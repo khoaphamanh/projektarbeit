@@ -18,7 +18,7 @@ khoa9898
 # Data
 
 ## High speed train (HST) breaking system
-Data down load https://www2.ie.tsinghua.edu.cn/rrml/Resources.html
+Download link: https://www2.ie.tsinghua.edu.cn/rrml/Resources.html
 không có đơn vị
 Total number of instances: 22368
 Total number of features: 46
@@ -32,7 +32,9 @@ label
 trong paper nói có 44 features, 21 continuousm, 22 categorical, chỉ dùng 39 features, downsampling xuống còn 300 samples, 150 0, 150 1
 
 # Tennessee Eastman Process (TEP) Dataset
-
+Download link: https://www.kaggle.com/datasets/averkij/tennessee-eastman-process-simulation-dataset?resource=download
+Data có Documentation
+Mỗi File sẽ có một Object tương ứng và dùng index để giải nén từ RData sang .csv
 
 # Model
 mất rất nh time để load checkpoint, giải pháp là down về dưới dạng .pth của pytorch để load nhanh hơn
