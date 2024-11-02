@@ -62,9 +62,7 @@ def download_and_extract_zip(url, output_path, tep_list=None):
 
         # List all objects in the R environment to find the data frame name
         object_names = list(robjects.r.objects())
-        # print("Objects in the .RData file:", object_names)
 
-        # Assuming the data frame is named 'df' (replace 'df' with the actual name found in object_names)
         # Replace 'df' with the correct object name from object_names list if it is different
         df_name = object_names[
             i
@@ -76,12 +74,9 @@ def download_and_extract_zip(url, output_path, tep_list=None):
 
         # Save the pandas DataFrame to CSV
         tep_data_csv_path = tep_list[i]
-        # print(r_data)
-        # print("tep_data_csv_path:", tep_data_csv_path)
         df.to_csv(tep_data_csv_path, index=False)
 
         print(f"CSV file downloaded successfully: {tep_data_csv_path}")
-        # print()
 
 
 # function to download .csv file given url
@@ -143,11 +138,11 @@ def download_data_convert_csv(name_data, url=None, tep_list=None):
 
 if __name__ == "__main__":
     # link hst (direct download from seafile)
-    # url_hst = "https://seafile.cloud.uni-hannover.de/f/23780066a22244899c94/?dl=1"
-    # download_data_convert_csv(
-    #     name_data=name_hst,
-    #     url=url_hst,
-    # )
+    url_hst = "https://seafile.cloud.uni-hannover.de/f/23780066a22244899c94/?dl=1"
+    download_data_convert_csv(
+        name_data=name_hst,
+        url=url_hst,
+    )
 
     # link TEP (direct download from seafile)
     url_tep = "https://seafile.cloud.uni-hannover.de/f/98107a4c284f481eb6c0/?dl=1"
