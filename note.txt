@@ -31,7 +31,7 @@ label
 
 trong paper nói có 44 features, 21 continuousm, 22 categorical, chỉ dùng 39 features, downsampling xuống còn 300 samples, 150 0, 150 1
 
-# Tennessee Eastman Process (TEP) Dataset
+## Tennessee Eastman Process (TEP) Dataset
 Download link: https://www.kaggle.com/datasets/averkij/tennessee-eastman-process-simulation-dataset?resource=download
 Data có Documentation
 Mỗi File sẽ có một Object tương ứng và dùng index để giải nén từ RData sang .csv
@@ -66,3 +66,5 @@ model: LlamaForCausalLM(
   )
   (lm_head): Linear(in_features=4096, out_features=32000, bias=False)
 )
+
+Model chỉ dùng divice đc với  NVIDIA L40S (48GB), còn với rtx 2080 Ti kể cả có dùng DataParallel đều bị OOM
