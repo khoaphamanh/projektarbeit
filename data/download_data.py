@@ -136,6 +136,9 @@ def download_data_convert_csv(name_data, url=None, tep_list=None):
     print()
 
 
+# download data HST and TEP
+print("check if data downloaded")
+
 # link hst (direct download from seafile)
 url_hst = "https://seafile.cloud.uni-hannover.de/f/23780066a22244899c94/?dl=1"
 download_data_convert_csv(
