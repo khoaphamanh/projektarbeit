@@ -53,19 +53,18 @@ class DataAnalysis:
             target = df.iloc[:, -1]
         else:
             features = df.iloc[:, 1:]
-            print("features len:", len(features))
             target = df.iloc[:, 0]
-            print("target len:", len(target))
-            # print("target:", target)
+
+        # Calculate the number of features and instances
+        dict_analysis["num_features"] = len(features.columns)
+        dict_analysis["num_instances"] = len(features)
 
         # extract label
         if extracted_label is not None:
             index_extracted_label = target.isin(extracted_label)
-            # print("index_extracted_label:", index_extracted_label)
             features = features[index_extracted_label]
-            # print("features len:", len(features))
             target = target[index_extracted_label]
-            # print("target len:", len(target))
+            dict_analysis["num_instances_extracted"] = len(features)
 
         # calculate the number of unique label
         dict_analysis["num_unique_label"] = target.nunique()
@@ -94,13 +93,6 @@ class DataAnalysis:
         dict_analysis["num_unique_categorical_features"] = (
             num_unique_categorical_features
         )
-
-        # Calculate the number of features and instances
-        num_features = len(features.columns)
-        num_instances = len(features)
-
-        dict_analysis["num_features"] = num_features
-        dict_analysis["num_instances"] = num_instances
 
         # print out the analysis
         if print_out:
