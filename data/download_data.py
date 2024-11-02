@@ -136,14 +136,13 @@ def download_data_convert_csv(name_data, url=None, tep_list=None):
     print()
 
 
-if __name__ == "__main__":
-    # link hst (direct download from seafile)
-    url_hst = "https://seafile.cloud.uni-hannover.de/f/23780066a22244899c94/?dl=1"
-    download_data_convert_csv(
-        name_data=name_hst,
-        url=url_hst,
-    )
+# link hst (direct download from seafile)
+url_hst = "https://seafile.cloud.uni-hannover.de/f/23780066a22244899c94/?dl=1"
+download_data_convert_csv(
+    name_data=name_hst,
+    url=url_hst,
+)
 
-    # link TEP (direct download from seafile)
-    url_tep = "https://seafile.cloud.uni-hannover.de/f/98107a4c284f481eb6c0/?dl=1"
-    download_data_convert_csv(name_data=name_tep_dir, url=url_tep, tep_list=tep_list)
+# link TEP (direct download from seafile)
+url_tep = "https://seafile.cloud.uni-hannover.de/f/98107a4c284f481eb6c0/?dl=1"
+download_data_convert_csv(name_data=name_tep_dir, url=url_tep, tep_list=tep_list)
