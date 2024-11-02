@@ -3,7 +3,7 @@ import zipfile
 import os
 import rpy2.robjects as robjects
 from rpy2.robjects import pandas2ri
-import pandas as pd
+from tqdm import tqdm
 
 # name of the data
 name_hst = "HST.csv"
@@ -47,32 +47,41 @@ def download_and_extract_zip(url, output_path, tep_list=None):
     except zipfile.BadZipFile:
         print(f"Failed to extract: Not a valid ZIP file")
 
-    # convert from RData to .csv
-    # Enable automatic conversion between R and pandas data frames
-    pandas2ri.activate()
+    # list all files in folder TEP
+    r_data_path = sorted(
+        [os.path.join(output_path, i) for i in os.listdir(output_path) if "." in i]
+    )
 
-    # Load the .RData file
-    r_data_path = "TEP/TEP_FaultFree_Training.RData"
-    robjects.r["load"](r_data_path)
+    for i, r_data in enumerate(tqdm(r_data_path, desc="Download data TEP")):
 
-    # List all objects in the R environment to find the data frame name
-    object_names = list(robjects.r.objects())
-    print("Objects in the .RData file:", object_names)
+        # Enable automatic conversion between R and pandas data frames
+        pandas2ri.activate()
 
-    # Assuming the data frame is named 'df' (replace 'df' with the actual name found in object_names)
-    # Replace 'df' with the correct object name from object_names list if it is different
-    df_name = object_names[
-        0
-    ]  # Use the first object name or replace with the correct one if you know it
-    df = robjects.r[df_name]
+        # Load the .RData file
+        robjects.r["load"](r_data)
 
-    # Convert to a pandas DataFrame
-    df = pandas2ri.rpy2py(df)
+        # List all objects in the R environment to find the data frame name
+        object_names = list(robjects.r.objects())
+        # print("Objects in the .RData file:", object_names)
 
-    # Save the pandas DataFrame to CSV
-    df.to_csv("test.csv", index=False)
+        # Assuming the data frame is named 'df' (replace 'df' with the actual name found in object_names)
+        # Replace 'df' with the correct object name from object_names list if it is different
+        df_name = object_names[
+            i
+        ]  # Use the first object name or replace with the correct one if you know it
+        df = robjects.r[df_name]
 
-    print("Data saved to test.csv")
+        # Convert to a pandas DataFrame
+        df = pandas2ri.rpy2py(df)
+
+        # Save the pandas DataFrame to CSV
+        tep_data_csv_path = tep_list[i]
+        # print(r_data)
+        # print("tep_data_csv_path:", tep_data_csv_path)
+        df.to_csv(tep_data_csv_path, index=False)
+
+        print(f"CSV file downloaded successfully: {tep_data_csv_path}")
+        # print()
 
 
 # function to download .csv file given url
@@ -100,8 +109,7 @@ def download_data_convert_csv(name_data, url=None, tep_list=None):
     # check data tep in .csv
     if tep_list is not None:
         tep_list = [os.path.join(data_dir_path, name_data_path, i) for i in tep_list]
-        tep_list = [os.path.exists(i) for i in tep_list]
-        print("tep_list:", tep_list)
+        tep_list_check = [os.path.exists(i) for i in tep_list]
 
     # Check if the path exists
     if not os.path.exists(name_data_path):
@@ -112,21 +120,34 @@ def download_data_convert_csv(name_data, url=None, tep_list=None):
             download_file(url=url, output_path=name_data_path)
         else:
             # If it's not a CSV, assume it's a ZIP file to be extracted as a directory
-            download_and_extract_zip(url=url, output_path=name_data_path)
+            download_and_extract_zip(
+                url=url, output_path=name_data_path, tep_list=tep_list
+            )
 
-    elif os.path.exists(name_data_path) and not all(tep_list):
-        1
+    elif (
+        os.path.exists(name_data_path)
+        and tep_list is not None
+        and not all(tep_list_check)
+    ):
+        download_and_extract_zip(url=url, output_path=name_data_path, tep_list=tep_list)
+
     else:
-        print(f"{name_data_path} is already downloaded")
+        if name_data.endswith(".csv"):
+            print(f"{name_data_path} is already downloaded")
+
+        elif tep_list is not None:
+            for i in tep_list:
+                print(f"{i} is already downloaded")
+    print()
 
 
 if __name__ == "__main__":
     # link hst (direct download from seafile)
-    url_hst = "https://seafile.cloud.uni-hannover.de/f/23780066a22244899c94/?dl=1"
-    download_data_convert_csv(
-        name_data=name_hst,
-        url=url_hst,
-    )
+    # url_hst = "https://seafile.cloud.uni-hannover.de/f/23780066a22244899c94/?dl=1"
+    # download_data_convert_csv(
+    #     name_data=name_hst,
+    #     url=url_hst,
+    # )
 
     # link TEP
     url_tep = "https://seafile.cloud.uni-hannover.de/f/98107a4c284f481eb6c0/?dl=1"
