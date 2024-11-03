@@ -66,8 +66,17 @@ class DataAnalysis:
             target = target[index_extracted_label]
             dict_analysis["num_instances_extracted"] = len(features)
 
+            # available label
+            available_lable = [
+                label for label in extracted_label if label in target.tolist()
+            ]
+            dict_analysis["available_label"] = available_lable
+
         # calculate the number of unique label
         dict_analysis["num_unique_label"] = target.nunique()
+        dict_analysis["unique_label"] = target.unique()
+        num_instances_each_label = target.value_counts().tolist()
+        dict_analysis["num_instances_each_label"] = num_instances_each_label
 
         # Initialize lists for categorical and continuous features
         features_name = []
@@ -97,7 +106,7 @@ class DataAnalysis:
         # print out the analysis
         if print_out:
             for k, v in dict_analysis.items():
-                print(k, "", v)
+                print(k, ":", v)
             print()
 
         return dict_analysis
