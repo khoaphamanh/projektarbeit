@@ -1,3 +1,5 @@
+NOTE 03.11.2024
+
 cách down model llama-2 và implement trên python
 
 1. tạo tk trên huggingface https://huggingface.co/join
@@ -18,23 +20,16 @@ khoa9898
 # Data
 
 ## High speed train (HST) breaking system
-Download link: https://www2.ie.tsinghua.edu.cn/rrml/Resources.html
-không có đơn vị
-Total number of instances: 22368
-Total number of features: 46
-Number of categorical features (integer values): 31
-Number of continuous features (float values): 15
-Number of instances in each label:
-label
-0    21979
-1      389
-
-trong paper nói có 44 features, 21 continuousm, 22 categorical, chỉ dùng 39 features, downsampling xuống còn 300 samples, 150 0, 150 1
+- Download link: https://www2.ie.tsinghua.edu.cn/rrml/Resources.html
+- không có đơn vị
+- trong paper nói có 44 features, 21 continuousm, 22 categorical, chỉ dùng 39 features, downsampling xuống còn 300 samples, 150 0, 150 1 đã đc downsampling
 
 ## Tennessee Eastman Process (TEP) Dataset
-Download link: https://www.kaggle.com/datasets/averkij/tennessee-eastman-process-simulation-dataset?resource=download
-Data có Documentation
-Mỗi File sẽ có một Object tương ứng và dùng index để giải nén từ RData sang .csv
+- Download link: https://www.kaggle.com/datasets/averkij/tennessee-eastman-process-simulation-dataset?resource=download
+- Data có Documentation
+- Mỗi File sẽ có một Object tương ứng và dùng index để giải nén từ RData sang .csv
+- chưa tìm thấy đơn vị
+- trong paper 52 features, 41 processed, 11 manipulated, 20 anomaly label, 1 normal. Chỉ dùng 33 features, 3 anomaly labels là 1, 4, 5. Chỉ sử dụng 400 instances cho train và 160 cho test, balance datasets
 
 # Model
 link github: https://github.com/meta-llama/llama?tab=readme-ov-file
