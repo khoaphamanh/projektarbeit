@@ -78,7 +78,6 @@ def download_and_extract_zip(url, output_path, tep_list=None):
 
         # remove rdata
         os.remove(r_data)
-        print(f"remove file successfully: {r_data}")
 
         print(f"CSV file downloaded successfully: {tep_data_csv_path}")
 
