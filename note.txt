@@ -64,3 +64,51 @@ model: LlamaForCausalLM(
 )
 
 Model chỉ dùng divice đc với  NVIDIA L40S (48GB), còn với rtx 2080 Ti kể cả có dùng DataParallel đều bị OOM
+
+# NOTE 10.12
+- đã fix đc lỗi OOM với device_map = "auto"
+
+1. Tutorial with prompt syntax. Source: https://www.youtube.com/watch?v=Vg3dS-NLUT4
+- prompt syntax:
+
+          <s>[INST] <<SYS>>
+          System prompt
+          <</SYS>>
+
+          User prompt [/INST] Model answer </s>
+
+<s> and </s>: start and end tokens
+
+[INST] and [/INST] instruction prompt for model to follow
+
+<<SYS>> and <</SYS>>:  system prompt guild how model should behave
+
+- example for a real case
+
+          Full example
+
+          <s>[INST] <<SYS>> You are a helpful, respectful and honest assistant. 
+          Always answer as helpfully as possible, while being safe. Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. 
+          Please ensure that your responses are socially unbiased and positive in nature. If a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. 
+          If you don't know the answer to a question, please don't share false information. <</SYS>> 
+
+          Ich habe vor einiger Zeit mit Marie darüber geredet, dass man meistens nur negative Post bekommt. Nun habe ich vor ihr einen netten, lustigen und positiven Brief zu schreiben.
+          Kannst du mir einen vollständigen Brief ausformulieren? [/INST] 
+
+          Liebe Marie, ich hoffe, du hast es gut und bist gesund. Ich habe vor einiger Zeit mit dir darüber gesprochen, dass man meistens nur negative Post bekommt. 
+          Das hat mich dazu gebracht, dir einen netten, lustigen und positiven Brief zu schreiben. Ich denke an dich und wollte dir sagen, wie wundervoll du bist.
+          Du hast mich so oft unterstützt und mich bei meinen Unternehmungen ermutigt, besonders wenn ich etwas Neues ausprobiert habe. 
+          Dein Wissen und deine Inspiration haben mir so viel geholfen, dass ich einige meiner Ziele erreicht habe. 
+          Ich bin dir sehr dankbar dafür und ich hoffe, dass du für deine Bemühungen belohnt wirst. Es ist wichtig, dass wir uns gegenseitig ermutigen, unsere Träume zu verfolgen und immer neue Ziele zu setzen. 
+          Ich wünsche dir alles Gute und hoffe, dass du deine Träume erfüllst. Alles Liebe, [Dein Name] </s>
+
+          Shorter example
+          <s>[INST] Kể cho tôi lịch sử của thành phố Đắk Lắk. [/INST] Đắk Lắk là tỉnh (không phải là thành phố) nằm ở trung tâm vùng Tây Nguyên, miền Trung Việt Nam, 
+          với bắt nguồn tên từ hồ Lắk. Hồi xưa, vùng đất Đắk Lắk thuộc vương quốc Chăm Pa và bị chiếm bởi Đại Việt vào khoảng thế kỉ 15. 
+          Thành phố Đắk Lắk được thành lập ngày 22/11/1904 theo chỉ định của Toàn quyền Đông Dương, lúc đó chưa chia huyện mà chỉ chia ra đơn vị làng. 
+          Sau khi bị trở thành đại lý hành chính trực thuộc tỉnh Kon Tum năm 1913, thì đến 1923 tỉnh Đắk Lắk mới được thành lập lại. Năm 1931 thì tỉnh Đắk Lắk được chia làm 5 quận: Ban Mê Thuột, Buôn Hồ, Đăk Song, Lăk và M'Drắk. 
+          Năm 1950, Bảo Đại ban hành Dụ số 6 đặt Cao nguyên Trung phần, cho phép hoàng triều có quy chế cai trị riêng. 
+          Sau này, tỉnh Đắk Lắk (lúc đó còn gọi là Darlac) trực thuộc chính quyền Việt Nam Cộng hòa, được xé ra chia lại nhằm phục vụ cho chiến tranh. 
+          Tỉnh Đắk Lắk của nước Việt Nam thống nhất từ năm 1976 hình thành từ hai tỉnh Darlac và Quảng Đức, và đến bây giờ là tỉnh có diện tích lớn thứ 3 cả nước. 
+          Năm 2003, tỉnh Đắk Lắk được tách thành hai tỉnh mới là Đắk Lắk và Đắk Nông, và năm 2010 thành phố Buôn Ma Thuột được công nhận là là đô thị loại I trực thuộc tỉnh. 
+          Ngày nay, tỉnh Đắk Lắk nổi tiếng về du lịch và văn hoá đa dạng của người Ê Đê, Nùng, Tày, M'nông, vân vân. </s>
