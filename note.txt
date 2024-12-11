@@ -112,3 +112,8 @@ Model chỉ dùng divice đc với  NVIDIA L40S (48GB), còn với rtx 2080 Ti k
           Tỉnh Đắk Lắk của nước Việt Nam thống nhất từ năm 1976 hình thành từ hai tỉnh Darlac và Quảng Đức, và đến bây giờ là tỉnh có diện tích lớn thứ 3 cả nước. 
           Năm 2003, tỉnh Đắk Lắk được tách thành hai tỉnh mới là Đắk Lắk và Đắk Nông, và năm 2010 thành phố Buôn Ma Thuột được công nhận là là đô thị loại I trực thuộc tỉnh. 
           Ngày nay, tỉnh Đắk Lắk nổi tiếng về du lịch và văn hoá đa dạng của người Ê Đê, Nùng, Tày, M'nông, vân vân. </s>
+
+- datasets original https://huggingface.co/datasets/timdettmers/openassistant-guanaco
+- datasets full https://huggingface.co/datasets/gpjt/openassistant-guanaco-llama2-format
+- datasets short 1k: https://huggingface.co/datasets/mlabonne/guanaco-llama2-1k
+
