@@ -69,7 +69,8 @@ Model chỉ dùng divice đc với  NVIDIA L40S (48GB), còn với rtx 2080 Ti k
 - đã fix đc lỗi OOM với device_map = "auto"
 
 1. Tutorial with prompt syntax. Source: https://www.youtube.com/watch?v=Vg3dS-NLUT4
-- prompt syntax:
+- prompt template:
+      - for 1 question, 1 answer
 
           <s>[INST] <<SYS>>
           System prompt
@@ -79,13 +80,13 @@ Model chỉ dùng divice đc với  NVIDIA L40S (48GB), còn với rtx 2080 Ti k
 
 <s> and </s>: start and end tokens
 
-[INST] and [/INST] instruction prompt for model to follow
+[INST] and [/INST] instruction, question and system behavior prompt for model to follow
 
 <<SYS>> and <</SYS>>:  system prompt guild how model should behave
 
 - example for a real case
 
-          Full example
+      - Full example
 
           <s>[INST] <<SYS>> You are a helpful, respectful and honest assistant. 
           Always answer as helpfully as possible, while being safe. Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. 
@@ -102,7 +103,7 @@ Model chỉ dùng divice đc với  NVIDIA L40S (48GB), còn với rtx 2080 Ti k
           Ich bin dir sehr dankbar dafür und ich hoffe, dass du für deine Bemühungen belohnt wirst. Es ist wichtig, dass wir uns gegenseitig ermutigen, unsere Träume zu verfolgen und immer neue Ziele zu setzen. 
           Ich wünsche dir alles Gute und hoffe, dass du deine Träume erfüllst. Alles Liebe, [Dein Name] </s>
 
-          Shorter example
+      - Shorter example
           <s>[INST] Kể cho tôi lịch sử của thành phố Đắk Lắk. [/INST] Đắk Lắk là tỉnh (không phải là thành phố) nằm ở trung tâm vùng Tây Nguyên, miền Trung Việt Nam, 
           với bắt nguồn tên từ hồ Lắk. Hồi xưa, vùng đất Đắk Lắk thuộc vương quốc Chăm Pa và bị chiếm bởi Đại Việt vào khoảng thế kỉ 15. 
           Thành phố Đắk Lắk được thành lập ngày 22/11/1904 theo chỉ định của Toàn quyền Đông Dương, lúc đó chưa chia huyện mà chỉ chia ra đơn vị làng. 
@@ -113,7 +114,17 @@ Model chỉ dùng divice đc với  NVIDIA L40S (48GB), còn với rtx 2080 Ti k
           Năm 2003, tỉnh Đắk Lắk được tách thành hai tỉnh mới là Đắk Lắk và Đắk Nông, và năm 2010 thành phố Buôn Ma Thuột được công nhận là là đô thị loại I trực thuộc tỉnh. 
           Ngày nay, tỉnh Đắk Lắk nổi tiếng về du lịch và văn hoá đa dạng của người Ê Đê, Nùng, Tày, M'nông, vân vân. </s>
 
-- datasets original https://huggingface.co/datasets/timdettmers/openassistant-guanaco
-- datasets full https://huggingface.co/datasets/gpjt/openassistant-guanaco-llama2-format
-- datasets short 1k: https://huggingface.co/datasets/mlabonne/guanaco-llama2-1k
+          <s>[INST] Kannst du einen Dialog zwischen 2 Personen erstellen, in dem ein Heiratsantrag unangenehm schiefgeht? [/INST] 
+          Angenommen das Paar befindet sich in einem Restaurant: Er geht langsam neben dem Tisch auf die Knie und flüstert ihr zu: Er: Schatz, die letzten Jahre mit dir waren wunderschön und ich kann mir kein Leben mehr ohne dich vorstellen. Möchtest du mich heiraten? Er bemerkt, dass sie die ganze Zeit einen Mann am Nebentisch beobachtet und die Frage gar nicht gehört hat. Er: Schatz, kannst du mir bitte zuhören! Ich habe etwas wichtiges zu sagen. Sie starrt weiter auf den Nachbartisch und zückt ihr Handy um ein Foto des Mannes am Nachbartisch zu machen und erwidert nur: Sie: Nein, nicht jetzt. Warte kurz! </s>
+          <s>[INST] Kannst du dem Dialog ein witziges Ende geben? [/INST] 
+          Er ist richtlich irritiert und auch etwas beschämt, dass die Liebe seines Lebens seinen Heiratsantrag verpasst und stattdessen einen wildfremden Mann fotografiert, welcher auch noch sehr gutaussehend ist, was die Sache nicht besser macht. Er (fasst sich ein Herz und fragt erneut): Ich kann nicht mehr warten, ich muss wissen ob du meine Frau - Sie (nimmt einen Finger vor den Mund): Shhh Ruhe, da vorne sitzt Leonardo Di Caprio und bekommt gerade einen Heiratsantrag. Gegenüber sitzt Leonardo Di Caprio, schaut etwas genervt zu den beiden herüber. Leonardo Di Caprio (zu seiner zu jungen Begleitung): Wow da macht einer einen Antrag. Leonardo zückt sein Handy um das Paar zu filmen, während seine Begleitung gerade vor ihm kniet und einen Heiratsantrag macht. </s>
+          
+          (original: {'text': '### Human: Kannst du einen Dialog zwischen 2 Personen erstellen, in dem ein Heiratsantrag unangenehm schiefgeht?### Assistant: Angenommen das Paar befindet sich in einem Restaurant:\n\nEr geht langsam neben dem Tisch auf die Knie und flüstert ihr zu:\n\nEr: Schatz, die letzten Jahre mit dir waren wunderschön und ich kann mir kein Leben mehr ohne dich vorstellen. Möchtest du mich heiraten?\n\nEr bemerkt, dass sie die ganze Zeit einen Mann am Nebentisch beobachtet und die Frage gar nicht gehört hat.\n\nEr: Schatz, kannst du mir bitte zuhören! Ich habe etwas wichtiges zu sagen. \n\nSie starrt weiter auf den Nachbartisch und zückt ihr Handy um ein Foto des Mannes am Nachbartisch zu machen und erwidert nur:\n\nSie: Nein, nicht jetzt. Warte kurz!### Human: Kannst du dem Dialog ein witziges Ende geben?### Assistant: Er ist richtlich irritiert und auch etwas beschämt, dass die Liebe seines Lebens seinen Heiratsantrag verpasst und stattdessen einen wildfremden Mann fotografiert, welcher auch noch sehr gutaussehend ist, was die Sache nicht besser macht.\n\nEr (fasst sich ein Herz und fragt erneut): Ich kann nicht mehr warten, ich muss wissen ob du meine Frau - \n\nSie (nimmt einen Finger vor den Mund): Shhh Ruhe, da vorne sitzt Leonardo Di Caprio und bekommt gerade einen Heiratsantrag. \n\nGegenüber sitzt Leonardo Di Caprio, schaut etwas genervt zu den beiden herüber.\n\nLeonardo Di Caprio (zu seiner zu jungen Begleitung): Wow da macht einer einen Antrag.\n\nLeonardo zückt sein Handy um das Paar zu filmen, während seine Begleitung gerade vor ihm kniet und einen Heiratsantrag macht.### Human: Was bedeutet richtlich? Kannst du meinen vorherigen Stil beibehalten?'})
+
+- chỉ dùng prompt template này nếu sử dụng model llama2 chat: "meta-llama/Llama-2-7b-chat-hf"
+
+- dataset: 
+  + datasets original https://huggingface.co/datasets/timdettmers/openassistant-guanaco
+  + datasets full https://huggingface.co/datasets/gpjt/openassistant-guanaco-llama2-format
+  + datasets short 1k: https://huggingface.co/datasets/mlabonne/guanaco-llama2-1k
 
