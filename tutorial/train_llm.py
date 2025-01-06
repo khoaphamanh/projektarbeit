@@ -51,7 +51,7 @@ fb4 (floating point 4-bit): chia đều trong khoảng min max value
 nf4 (normalized floating point 4-bit): normalized wieghts (giá trị được chia) = weight / sqrt(variance of weights)
 """
 
-# output directory
+# output directory, đây là nơi lưu lại metrcis, những thứ đã được train như optimizer, giúp cho việc resume training dễ dàng hơn.
 output_dir = "./results"
 
 # Enable fp16/bf16 training (set bf16 to True with an A100)
@@ -98,7 +98,7 @@ trong 1 batch sẽ có những sequences có cùng lenght để đỡ tốn memo
 """
 save_steps = 0
 """
-cứ bn step thì lưu lại weights, bias ( trường hợp này là 0)
+cứ bn step thì lưu lại weights, bias hay các giá trị có trong optimizer nhằm tiếp tục train, resume training. ( trường hợp này là 0)
 """
 logging_steps = 25
 """
@@ -119,88 +119,94 @@ dataset = load_dataset(dataset_name, split="train")
 
 # Load tokenizer and model with QLoRA configuration
 compute_dtype = getattr(torch, compute_dtype)  # torch.float16
-"""
-trong bài này sẽ sử dụng QLoRA về bản chất là kết hợp của 
-- Quantizer: các weights sẽ được quantizer hay đưa về dạng 4 bit precision
-- Ứng dung LoRA vào quá trình huấn luyện
-"""
 
-# QLoRA configuration
-bnb_config = BitsAndBytesConfig(
-    load_in_4bit=use_4bit,
-    bnb_4bit_quant_type=bnb_4bit_quant_type,
-    bnb_4bit_compute_dtype=compute_dtype,
-)
+if __name__ == "__main__":
 
-# Check GPU compatibility with bfloat16
-# if compute_dtype == torch.float16 and use_4bit:
-#     major, _ = torch.cuda.get_device_capability()
-#     if major >= 8:
-#         print("=" * 80)
-#         print("Your GPU supports bfloat16: accelerate training with bf16=True")
-#         print("=" * 80)
+    """
+    trong bài này sẽ sử dụng QLoRA về bản chất là kết hợp của
+    - Quantizer: các weights sẽ được quantizer hay đưa về dạng 4 bit precision
+    - Ứng dung LoRA vào quá trình huấn luyện
+    """
 
-# load model
-model = AutoModelForCausalLM.from_pretrained(
-    model_name, quantization_config=bnb_config, device_map=device_map
-)
-model.config.use_cache = False
-model.config.pretraining_tp = 1
+    # QLoRA configuration
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=use_4bit,
+        bnb_4bit_quant_type=bnb_4bit_quant_type,
+        bnb_4bit_compute_dtype=compute_dtype,
+    )
 
-# load LLaMA tokenizer
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-"""
-AutoTokenizer là class chung để sử dụng tokenizer nếu như ng dung k biết nên sử dụng class tokenizer nào cho model llm của mình.
-"""
-# Set pad_token to eos_token
-tokenizer.pad_token = tokenizer.eos_token
+    # Check GPU compatibility with bfloat16
+    if compute_dtype == torch.float16 and use_4bit:
+        major, _ = torch.cuda.get_device_capability()
+        if major >= 8:
+            print("=" * 80)
+            print("Your GPU supports bfloat16: accelerate training with bf16=True")
+            print("=" * 80)
 
-# Set padding direction
-tokenizer.padding_side = "right"
+    # load model
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name, quantization_config=bnb_config, device_map=device_map
+    )
+    model.config.use_cache = False
+    model.config.pretraining_tp = 1
 
-# load LoRA config
-peft_config = LoraConfig(
-    lora_alpha=lora_alpha,
-    lora_dropout=lora_dropout,
-    r=lora_r,
-    bias="none",  # chọn bias bằng none thì bias sẽ k xuất hiện trong A và B, bias gốc trong model cũng sẽ không đc update, tương tự như weights.
-    task_type="CAUSAL_LM",  # use case: Text generation (e.g., writing stories, generating code).
-)
+    # load LLaMA tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    """
+    AutoTokenizer là class chung để sử dụng tokenizer nếu như ng dung k biết nên sử dụng class tokenizer nào cho model llm của mình. Tokenizer không được tính là model weights, chúng đc predefine và được tính là 
+    """
+    # Set pad_token to eos_token
+    tokenizer.pad_token = tokenizer.eos_token
 
-# Set training parameters, TrainingArguments define the training configuraion for training process
-training_arguments = TrainingArguments(
-    output_dir=output_dir,
-    num_train_epochs=epochs,
-    per_device_train_batch_size=batch_size,
-    gradient_accumulation_steps=gradient_accumulation_steps,
-    optim=optim,
-    save_steps=save_steps,
-    logging_steps=logging_steps,
-    learning_rate=learning_rate,
-    weight_decay=weight_decay,
-    fp16=fp16,
-    bf16=bf16,
-    max_grad_norm=max_gradient_norm,
-    warmup_ratio=warmup_ratio,
-    group_by_length=group_by_length,
-    lr_scheduler_type=lr_scheduler_type,
-    report_to="tensorboard",
-)
+    # Set padding direction
+    tokenizer.padding_side = "right"
 
-# Check column names
-print(dataset.column_names)
+    # load LoRA config
+    peft_config = LoraConfig(
+        lora_alpha=lora_alpha,
+        lora_dropout=lora_dropout,
+        r=lora_r,
+        bias="none",  # chọn bias bằng none thì bias sẽ k xuất hiện trong A và B, bias gốc trong model cũng sẽ không đc update, tương tự như weights.
+        task_type="CAUSAL_LM",  # use case: Text generation (e.g., writing stories, generating code).
+    )
 
-# Alternatively, you can also print the features:
-print(dataset.features)
+    # Set training parameters, TrainingArguments define the training configuraion for training process
+    training_arguments = TrainingArguments(
+        output_dir=output_dir,
+        num_train_epochs=epochs,
+        per_device_train_batch_size=batch_size,
+        gradient_accumulation_steps=gradient_accumulation_steps,
+        optim=optim,
+        save_steps=save_steps,
+        logging_steps=logging_steps,
+        learning_rate=learning_rate,
+        weight_decay=weight_decay,
+        fp16=fp16,
+        bf16=bf16,
+        max_grad_norm=max_gradient_norm,
+        warmup_ratio=warmup_ratio,
+        group_by_length=group_by_length,
+        lr_scheduler_type=lr_scheduler_type,
+        # report_to="tensorboard",
+    )
 
-# train the model using SFTTrainer
-trainer = SFTTrainer(
-    model=model,
-    train_dataset=dataset,
-    peft_config=peft_config,
-    dataset_text_field="text",  # dataset có dict gồm key là "text"
-    max_seq_length=max_seq_length,
-    tokenizer=tokenizer,
-    args=training_arguments,
-    packing=packing,
-)
+    # Check column names
+    print(dataset.column_names)
+
+    # Alternatively, you can also print the features:
+    print(dataset.features)
+
+    # train the model using SFTTrainer
+    trainer = SFTTrainer(
+        model=model,
+        train_dataset=dataset,
+        peft_config=peft_config,
+        dataset_text_field="text",  # dataset có dict gồm key là "text"
+        max_seq_length=max_seq_length,
+        tokenizer=tokenizer,
+        args=training_arguments,
+        packing=packing,
+    )
+
+    trainer.train()
+    trainer.model.save_pretrained(new_model)
