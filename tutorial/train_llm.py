@@ -21,6 +21,11 @@ model_name = "meta-llama/Llama-2-7b-chat-hf"
 dataset_name = "mlabonne/guanaco-llama2-1k"
 
 # our new pretrained fine tunned model using LoRA
+"""
+sau khi train xong dir này có chứa:
+adapter_config.json: hyperparameters của lora
+adapter_model.safetensors: fine tunned model weights
+"""
 new_model = "Llama-2-7b-chat-finetune"
 
 # hyperparameters for LoRA
@@ -52,6 +57,20 @@ nf4 (normalized floating point 4-bit): normalized wieghts (giá trị được c
 """
 
 # output directory, đây là nơi lưu lại metrcis, những thứ đã được train như optimizer, giúp cho việc resume training dễ dàng hơn.
+"""
+trong directory này có chứa
+adapter_config.json: hyperparameters của lora
+adapter_model.safetensors: fine tunned model weights
+optimizer.pt: state của optimizer
+scheduler.pt: state của learning rate
+rng_state.pt: state của random numbers cho reproducibility
+special_tokens_map.json: maps của special tokens như PAD và EOS
+tokenizer.json: tokenizer như word to index, vocab dictionary 
+tokenizer_config.json: config của tokenizer
+training_args.bin: Serialized TrainingArguments object, storing all training hyperparameters.
+trainer_state.json: nơi lưu giữ các metrics từng epoch 
+
+"""
 output_dir = "./results"
 
 # Enable fp16/bf16 training (set bf16 to True with an A100)
