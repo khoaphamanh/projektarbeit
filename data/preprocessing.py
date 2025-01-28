@@ -7,17 +7,24 @@ class DataPreprocessing(DataAnalysis):
     def __init__(self, data_name):
         super().__init__(data_name)
 
-    def load_data_raw_csv(self, extracted_label=None, extracted_feature = None):
+    def load_data_raw_csv(self, extracted_label=None):
         """
         load raw data as dataframe
         """
         # load dict analysis
         data_analysis_dict = self.analysis(extracted_label=extracted_label)
 
-        #load all
+        # load all data as data frame
         name_csv_files = data_analysis_dict.keys()
-        for i in name_csv_files:
-            data = 
+        for data_csv_name, data_dict in data_analysis_dict.items():
+
+            # data as dataframe
+            data_df = data_dict["df"]
+
+            # eliminate the column that has only 1
+            data_df = data_df.loc[:, data_df.nunique() > 1]
+
+            # name of the feature
 
 
 if __name__ == "__main__":
