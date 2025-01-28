@@ -6,7 +6,7 @@ from rpy2.robjects import pandas2ri
 from tqdm import tqdm
 
 # name of the data
-name_hst = "HST.csv"
+name_hst = "HST"
 name_tep_dir = "TEP"
 
 # name tep for each part of the data
@@ -98,7 +98,7 @@ def download_file(url, output_path):
 
 def download_data_convert_csv(name_data, url=None, tep_list=None):
 
-    # Absolute path to current directory
+    # data directory
     data_dir_path = os.path.dirname(os.path.abspath(__file__))
 
     # Full path to the data (csv file or directory)
@@ -113,8 +113,10 @@ def download_data_convert_csv(name_data, url=None, tep_list=None):
     if not os.path.exists(name_data_path):
 
         # If it doesn't exist, determine whether it's a file or a directory
-        if name_data.endswith(".csv"):
-            # If it's a CSV, download it
+        # for HST data
+        if tep_list is None:
+            os.makedirs(name_data_path, exist_ok=True)
+            name_data_path = os.path.join(name_data_path, "{}.csv".format(name_data))
             download_file(url=url, output_path=name_data_path)
         else:
             # If it's not a CSV, assume it's a ZIP file to be extracted as a directory
@@ -130,7 +132,8 @@ def download_data_convert_csv(name_data, url=None, tep_list=None):
         download_and_extract_zip(url=url, output_path=name_data_path, tep_list=tep_list)
 
     else:
-        if name_data.endswith(".csv"):
+        # for HST data
+        if tep_list is None:
             print(f"{name_data_path} is already downloaded")
 
         elif tep_list is not None:
