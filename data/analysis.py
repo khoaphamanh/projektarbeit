@@ -41,7 +41,9 @@ class DataAnalysis:
         extracted_label=None,
         print_out=False,
     ):
-
+        """
+        analysis of each csv file of the data
+        """
         # dict analysis
         dict_analysis = {}
 
