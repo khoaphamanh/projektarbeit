@@ -39,6 +39,7 @@ class DataAnalysis:
         self,
         file_csv_name=None,
         extracted_label=None,
+        extracted_feature=None,
         print_out=False,
     ):
         """
@@ -56,33 +57,33 @@ class DataAnalysis:
 
         # Separate features and target (last column as target)
         if "HST" in self.data_name:
-            features = df.iloc[:, :-1]
-            target = df.iloc[:, -1]
+            X = df.iloc[:, :-1]
+            y = df.iloc[:, -1]
         else:
-            features = df.iloc[:, 1:]
-            target = df.iloc[:, 0]
+            X = df.iloc[:, 1:]
+            y = df.iloc[:, 0]
 
         # Calculate the number of features and instances
-        dict_analysis["num_instances"] = len(features)
-        dict_analysis["num_features"] = len(features.columns)
+        dict_analysis["num_instances"] = len(X)
+        dict_analysis["num_features"] = len(X.columns)
 
         # extract label
         if extracted_label is not None:
-            index_extracted_label = target.isin(extracted_label)
-            features = features[index_extracted_label]
-            target = target[index_extracted_label]
-            dict_analysis["num_instances_extracted"] = len(features)
+            index_extracted_label = y.isin(extracted_label)
+            X = X[index_extracted_label]
+            y = y[index_extracted_label]
+            dict_analysis["num_instances_extracted"] = len(X)
 
             # available label
             available_lable = [
-                label for label in extracted_label if label in target.tolist()
+                label for label in extracted_label if label in y.tolist()
             ]
             dict_analysis["available_label"] = available_lable
 
         # calculate the number of unique label
-        dict_analysis["num_unique_label"] = target.nunique()
-        dict_analysis["unique_label"] = target.unique()
-        num_instances_each_label = target.value_counts().tolist()
+        dict_analysis["num_unique_label"] = y.nunique()
+        dict_analysis["unique_label"] = y.unique()
+        num_instances_each_label = y.value_counts().tolist()
         dict_analysis["num_instances_each_label"] = num_instances_each_label
 
         # Initialize lists for categorical and continuous features
@@ -92,13 +93,13 @@ class DataAnalysis:
         num_unique_categorical_features = []
 
         # Identify categorical and continuous features based on data types, int is categorical, float continious
-        for column in features.columns:
+        for column in X.columns:
             features_name.append(column)
-            if pd.api.types.is_integer_dtype(features[column]):
+            if pd.api.types.is_integer_dtype(X[column]):
                 categorical_features.append(column)
-                num_unique_categorical_features.append(features[column].nunique())
+                num_unique_categorical_features.append(X[column].nunique())
 
-            elif pd.api.types.is_float_dtype(features[column]):
+            elif pd.api.types.is_float_dtype(X[column]):
                 continuous_features.append(column)
 
         dict_analysis["features_name"] = features_name
@@ -132,4 +133,4 @@ if __name__ == "__main__":
     tep = DataAnalysis(data_name)
     extracted_label = [0, 1, 4, 5]
     tep_data_dict = tep.analysis(extracted_label=extracted_label, print_out=True)
-    print("tep_data_dict:", tep_data_dict)
+    # print("tep_data_dict:", tep_data_dict)
