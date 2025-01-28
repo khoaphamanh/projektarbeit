@@ -15,7 +15,7 @@ class DataAnalysis:
         check if data available, if not download data
         """
         # check if data available
-        if not os.path.isfile(self.data_name):
+        if not os.path.exists(self.data_name):
             import download_data
 
     def analysis(self, extracted_label=None, print_out=False):
@@ -33,7 +33,7 @@ class DataAnalysis:
             )
             data_analysis_dict[file_csv] = df
 
-        return {self.data_name: data_analysis_dict}
+        return data_analysis_dict
 
     def csv_analysis(
         self,
