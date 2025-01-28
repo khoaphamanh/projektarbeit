@@ -1,6 +1,5 @@
 import os
 import pandas as pd
-from download_data import *
 
 
 # class to analysis data
@@ -9,24 +8,20 @@ class DataAnalysis:
         self.data_name = data_name
         self.data_dir_path = os.path.dirname(os.path.abspath(__file__))
         self.data_path = os.path.join(self.data_dir_path, self.data_name)
+        self.check_data()
 
     def check_data(self):
-        # check if data name a file (True) or a directory (False)
-        if os.path.isfile(self.data_name):
-            return True
-        return False
+        # check if data available
+        if not os.path.isfile(self.data_name):
+            import download_data
 
     def analysis(self, extracted_label=None, print_out=False):
         # analysis data based on given data name (check if HST or TEP)
-        check = self.check_data()
-        if check is True:
-            self.csv_analysis(print_out=print_out)
-        else:
-            tep_data = sorted(i for i in os.listdir(self.data_path) if ".csv" in i)
-            for tep in tep_data:
-                self.csv_analysis(
-                    csv_name=tep, extracted_label=extracted_label, print_out=True
-                )
+        data_csv = sorted(i for i in os.listdir(self.data_path) if ".csv" in i)
+        for file_csv in data_csv:
+            self.csv_analysis(
+                csv_name=file_csv, extracted_label=extracted_label, print_out=print_out
+            )
 
     def csv_analysis(self, csv_name=None, extracted_label=None, print_out=False):
 
@@ -56,8 +51,8 @@ class DataAnalysis:
             target = df.iloc[:, 0]
 
         # Calculate the number of features and instances
-        dict_analysis["num_features"] = len(features.columns)
         dict_analysis["num_instances"] = len(features)
+        dict_analysis["num_features"] = len(features.columns)
 
         # extract label
         if extracted_label is not None:
@@ -114,7 +109,7 @@ class DataAnalysis:
 
 if __name__ == "__main__":
 
-    data_name = "HST.csv"
+    data_name = "HST"
     hst = DataAnalysis(data_name)
     hst.analysis(print_out=True)
 
