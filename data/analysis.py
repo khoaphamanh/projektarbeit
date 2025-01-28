@@ -39,7 +39,6 @@ class DataAnalysis:
         self,
         file_csv_name=None,
         extracted_label=None,
-        extracted_feature=None,
         print_out=False,
     ):
         """
@@ -78,6 +77,7 @@ class DataAnalysis:
             available_lable = [
                 label for label in extracted_label if label in y.tolist()
             ]
+            dict_analysis["extracted_label"] = extracted_label
             dict_analysis["available_label"] = available_lable
 
         # calculate the number of unique label
