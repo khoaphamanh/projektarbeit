@@ -117,7 +117,8 @@ class DataAnalysis:
                 print(k, ":", v)
             print()
 
-        dict_analysis["df"] = df
+        dict_analysis["X_df"] = X
+        dict_analysis["y_df"] = y
 
         return dict_analysis
 
