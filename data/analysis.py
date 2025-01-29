@@ -4,10 +4,10 @@ import pandas as pd
 
 # class to analysis data
 class DataAnalysis:
-    def __init__(self, data_name):
-        self.data_name = data_name
+    def __init__(self, name_data):
+        self.name_data = name_data
         self.data_dir_path = os.path.dirname(os.path.abspath(__file__))
-        self.data_name_path = os.path.join(self.data_dir_path, self.data_name)
+        self.data_name_path = os.path.join(self.data_dir_path, self.name_data)
         self.check_data()
 
     def check_data(self):
@@ -15,7 +15,7 @@ class DataAnalysis:
         check if data available, if not download data
         """
         # check if data available
-        if not os.path.exists(self.data_name):
+        if not os.path.exists(self.name_data):
             import download_data
 
     def analysis(self, extracted_label=None, print_out=False):
@@ -55,7 +55,7 @@ class DataAnalysis:
         dict_analysis["name_csv"] = file_csv_name
 
         # Separate features and target (last column as target)
-        if "HST" in self.data_name:
+        if "HST" in self.name_data:
             X = df.iloc[:, :-1]
             y = df.iloc[:, -1]
         else:
@@ -102,7 +102,7 @@ class DataAnalysis:
             elif pd.api.types.is_float_dtype(X[column]):
                 continuous_features.append(column)
 
-        dict_analysis["features_name"] = features_name
+        dict_analysis["feature_name"] = features_name
         dict_analysis["continuous_features"] = continuous_features
         dict_analysis["num_continuous_features"] = len(continuous_features)
         dict_analysis["categorical_features"] = categorical_features
@@ -129,8 +129,8 @@ if __name__ == "__main__":
     hst_data_dict = hst.analysis(print_out=True)
     print("hst_data_dict:", hst_data_dict)
 
-    data_name = "TEP"
-    tep = DataAnalysis(data_name)
-    extracted_label = [0, 1, 4, 5]
-    tep_data_dict = tep.analysis(extracted_label=extracted_label, print_out=True)
-    # print("tep_data_dict:", tep_data_dict)
+    # data_name = "TEP"
+    # tep = DataAnalysis(data_name)
+    # extracted_label = [0, 1, 4, 5]
+    # tep_data_dict = tep.analysis(extracted_label=extracted_label, print_out=True)
+    # # print("tep_data_dict:", tep_data_dict)
