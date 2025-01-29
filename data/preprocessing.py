@@ -1,13 +1,14 @@
 import os
 from analysis import DataAnalysis
 from sklearn.model_selection import train_test_split
+from datasets import Dataset
 
 
 class DataPreprocessing(DataAnalysis):
     def __init__(self, data_name):
         super().__init__(data_name)
 
-    def load_data_raw_csv(self, extracted_label=None):
+    def load_data_raw_csv(self, extracted_label=None, normalize=True):
         """
         load raw data as dataframe
         """
@@ -20,11 +21,21 @@ class DataPreprocessing(DataAnalysis):
 
             # data as dataframe
             data_df = data_dict["df"]
+            print("data_df shape:", data_df.shape)
 
             # eliminate the column that has only 1
             data_df = data_df.loc[:, data_df.nunique() > 1]
+            print("data_df shape:", data_df.shape)
 
             # name of the feature
+            feature_name = data_dict["feature_name"]
+            print("feature_name:", feature_name)
+
+    def convert_df_to_text(self):
+        pass
+
+    def create_prompt(self):
+        pass
 
 
 if __name__ == "__main__":
