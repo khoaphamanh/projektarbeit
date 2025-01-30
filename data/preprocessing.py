@@ -46,6 +46,7 @@ class DataPreprocessing(DataAnalysis):
 
             # name of the feature
             name_feature = X_df.columns
+            print("name_feature:", name_feature)
 
             # unique labels
             # unique_labels =
@@ -138,15 +139,19 @@ class DataPreprocessing(DataAnalysis):
         """
         return (np.array(arg) for arg in args)
 
-    def convert_df_to_text(self, X_array, y_array, name_feature):
+    def convert_df_to_text(self, X_array, y_array, name_feature, normalize=False):
         """
         convert array to text given the X, y and feature name
         """
         # data text as list of all instances in X
         data_text_list_all_instances = []
 
-        # unique labels of y
+        # unique labels of y as text
         unique_labels_string = " or ".join(map(str, np.unique(y_array).tolist()))
+
+        # check if name_feature is given
+        if name_feature is None or name_feature is False:
+            name_feature = list(range(len(y_array)))
 
         # loop through all samples from X and y
         for i in range(len(X_array)):
@@ -182,14 +187,23 @@ class DataPreprocessing(DataAnalysis):
 
         # format with create_prompt function
         formatted_data = [
-            {"text": self.create_prompt(d["question"], d["answer"])}
+            {
+                "text": self.create_prompt(
+                    question=d["question"], answer=d["answer"], normalize=normalize
+                )
+            }
             for d in data_text_list_all_instances
         ]
+
+        for i in formatted_data:
+            print(i)
+            print()
+
         return formatted_data
 
-    def create_prompt(self, question, answer):
+    def create_prompt(self, question, answer, normalize=False):
         """create prompt using the syntax of llama-2"""
-        return f"<s>[INST] <<SYS>> {self.system_behavior()} <</SYS>> {question} [/INST] {answer} </s>"
+        return f"<s>[INST] <<SYS>> {self.system_behavior(normalize=normalize)} <</SYS>> {question} [/INST] {answer} </s>"
 
     def system_behavior(self, normalize=False):
         """
