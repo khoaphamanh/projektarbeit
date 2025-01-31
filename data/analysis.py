@@ -15,7 +15,7 @@ class DataAnalysis:
         check if data available, if not download data
         """
         # check if data available
-        if not os.path.exists(self.name_data):
+        if not os.path.exists(self.data_name_path):
             import download_data
 
     def analysis(self, extracted_label=None, print_out=False):
@@ -125,13 +125,13 @@ class DataAnalysis:
 
 if __name__ == "__main__":
 
-    data_name = "HST"
-    hst = DataAnalysis(data_name)
-    hst_data_dict = hst.analysis(print_out=True)
-    print("hst_data_dict:", hst_data_dict)
+    # data_name = "HST"
+    # hst = DataAnalysis(data_name)
+    # hst_data_dict = hst.analysis(print_out=True)
+    # print("hst_data_dict:", hst_data_dict)
 
-    # data_name = "TEP"
-    # tep = DataAnalysis(data_name)
-    # extracted_label = [0, 1, 4, 5]
-    # tep_data_dict = tep.analysis(extracted_label=extracted_label, print_out=True)
-    # # print("tep_data_dict:", tep_data_dict)
+    data_name = "TEP"
+    tep = DataAnalysis(data_name)
+    extracted_label = [0, 1, 4, 5]
+    tep_data_dict = tep.analysis(extracted_label=extracted_label, print_out=True)
+    print("tep_data_dict:", tep_data_dict)

@@ -65,7 +65,9 @@ class DataPreprocessing(DataAnalysis):
             for name_file, data_dict in data_analysis_dict.items():
                 X_df = data_dict["X_df"]
                 y_df = data_dict["y_df"]
-                if name_file.startwith("train"):
+
+                # sort the name
+                if name_file.startswith("train"):
                     X_df_train.append(X_df)
                     y_df_train.append(y_df)
                 else:
@@ -74,13 +76,9 @@ class DataPreprocessing(DataAnalysis):
 
             # concat train and test dataset (normal and anomaly) of TEP
             X_df_train = pd.concat(X_df_train, axis=0)
-            print("X_df_train shape:", X_df_train.shape)
             y_df_train = pd.concat(y_df_train, axis=0)
-            print("y_df_train shape:", y_df_train.shape)
             X_df_test = pd.concat(X_df_test, axis=0)
-            print("X_df_test shape:", X_df_test.shape)
             y_df_test = pd.concat(y_df_test, axis=0)
-            print("y_df_test shape:", y_df_test.shape)
 
             # preprcessing after train test split TEP
             train_datasets, test_datasets = self.preprocessing_after_train_test_split(
@@ -88,6 +86,8 @@ class DataPreprocessing(DataAnalysis):
                 X_df_test=X_df_test,
                 y_df_train=y_df_train,
                 y_df_test=y_df_test,
+                downsampling_n_instances_train=downsampling_n_instances_train,
+                downsampling_n_instances_test=downsampling_n_instances_test,
                 normalize=normalize,
                 name_feature=name_feature,
             )
@@ -200,6 +200,7 @@ class DataPreprocessing(DataAnalysis):
         X_df_downsampling = []
         y_df_downsampling = []
 
+        # loop through each labels
         for l in unique_labels:
             # sampling, each instance will be different
             X_df_l = X_df[y_df == l].sample(
@@ -345,15 +346,26 @@ class DataPreprocessing(DataAnalysis):
 
 if __name__ == "__main__":
 
+    from timeit import default_timer
+
+    start = default_timer()
     seed = 1998
-    data_name = "HST"
+
+    # hyperparameters
+    normalize = True
+    name_feature = True
+    downsampling_n_instances = 300
+    downsampling_n_instances_train = 400
+    downsampling_n_instances_test = 160
+
+    # load data
+    # data_name = "HST"
     # hst = DataPreprocessing(data_name, seed=seed)
     # hst_data_dict = hst.create_text_dataset(
     #     downsampling_n_instances=300, normalize=True, name_feature=True
     # )
 
     data_name = "TEP"
-
     extracted_label = [0, 1, 4, 5]
     tep = DataPreprocessing(data_name, seed=seed)
     tep.create_text_dataset(
@@ -363,3 +375,6 @@ if __name__ == "__main__":
         downsampling_n_instances_test=160,
         name_feature=True,
     )
+
+    end = default_timer()
+    print(end - start)
