@@ -14,62 +14,175 @@ class DataPreprocessing(DataAnalysis):
         self.train_size = 0.8
 
     def create_text_dataset(
-        self, extracted_label=None, normalize=False, downsampling_n_instances=None
+        self,
+        extracted_label=None,
+        normalize=False,
+        downsampling_n_instances=None,
+        downsampling_n_instances_train=None,
+        downsampling_n_instances_test=None,
+        name_feature=False,
     ):
         """
         load raw data as dataframe
         """
-        # system behavior
-        system_behavior = self.system_behavior(normalize=normalize)
         # load dict analysis
         data_analysis_dict = self.analysis(extracted_label=extracted_label)
 
-        # load all data as data frame
-        name_csv_files = data_analysis_dict.keys()
-        for data_csv_name, data_dict in data_analysis_dict.items():
-
+        # load data not splited in HST data
+        if self.name_data == "HST":
             # data as dataframe
+            data_dict = data_analysis_dict[f"{self.name_data}.csv"]
             X_df = data_dict["X_df"]
-            # print("X_df shape:", X_df.shape)
             y_df = data_dict["y_df"]
 
-            # stratify downsampling
-            if type(downsampling_n_instances) is int:
-                X_df, y_df = self.stratified_downsampling(
+            # split the dataset HST
+            X_df_train, X_df_test, y_df_train, y_df_test = (
+                self.preprocessing_before_train_test_split(
                     X_df=X_df,
                     y_df=y_df,
                     downsampling_n_instances=downsampling_n_instances,
                 )
-
-            # eliminate the column that has only 1
-            X_df = X_df.loc[:, X_df.nunique() > 1]
-
-            # name of the feature
-            name_feature = X_df.columns
-            print("name_feature:", name_feature)
-
-            # unique labels
-            # unique_labels =
-            # split train and test
-            X_df_train, X_df_test, y_df_train, y_df_test = (
-                self.train_test_split_dataset(X_df, y_df)
             )
 
-            # normalize
-            if normalize:
-                X_df_train, X_df_test = self.normalization(
-                    X_df_train=X_df_train, X_df_test=X_df_test
-                )
-
-            # convert to array
-            X_array_train, X_array_test, y_array_train, y_array_test = (
-                self.convert_to_array(X_df_train, X_df_test, y_df_train, y_df_test)
+            # preprcessing after train test split HST
+            train_datasets, test_datasets = self.preprocessing_after_train_test_split(
+                X_df_train=X_df_train,
+                X_df_test=X_df_test,
+                y_df_train=y_df_train,
+                y_df_test=y_df_test,
+                normalize=normalize,
+                name_feature=name_feature,
             )
-            # print("feature_name:", feature_name)
 
-            self.convert_df_to_text(
-                X_array=X_array_train, y_array=y_array_train, name_feature=name_feature
+        # load data plited in TEP data
+        elif self.name_data == "TEP":
+            X_df_train = []
+            y_df_train = []
+            X_df_test = []
+            y_df_test = []
+
+            # loop through all data files that start with train and tests
+            for name_file, data_dict in data_analysis_dict.items():
+                X_df = data_dict["X_df"]
+                y_df = data_dict["y_df"]
+                if name_file.startwith("train"):
+                    X_df_train.append(X_df)
+                    y_df_train.append(y_df)
+                else:
+                    X_df_test.append(X_df)
+                    y_df_test.append(y_df)
+
+            # concat train and test dataset (normal and anomaly) of TEP
+            X_df_train = pd.concat(X_df_train, axis=0)
+            print("X_df_train shape:", X_df_train.shape)
+            y_df_train = pd.concat(y_df_train, axis=0)
+            print("y_df_train shape:", y_df_train.shape)
+            X_df_test = pd.concat(X_df_test, axis=0)
+            print("X_df_test shape:", X_df_test.shape)
+            y_df_test = pd.concat(y_df_test, axis=0)
+            print("y_df_test shape:", y_df_test.shape)
+
+            # preprcessing after train test split TEP
+            train_datasets, test_datasets = self.preprocessing_after_train_test_split(
+                X_df_train=X_df_train,
+                X_df_test=X_df_test,
+                y_df_train=y_df_train,
+                y_df_test=y_df_test,
+                normalize=normalize,
+                name_feature=name_feature,
             )
+
+        for i in test_datasets:
+            print(i)
+
+    def preprocessing_before_train_test_split(
+        self,
+        X_df: pd.DataFrame,
+        y_df: pd.DataFrame,
+        downsampling_n_instances=None,
+    ):
+        # stratify downsampling
+        if type(downsampling_n_instances) is int:
+            X_df, y_df = self.stratified_downsampling(
+                X_df=X_df,
+                y_df=y_df,
+                downsampling_n_instances=downsampling_n_instances,
+            )
+
+        # eliminate the column that has only 1
+        X_df = X_df.loc[:, X_df.nunique() > 1]
+
+        # split train and test
+        X_df_train, X_df_test, y_df_train, y_df_test = self.train_test_split_dataset(
+            X_df, y_df
+        )
+
+        return X_df_train, X_df_test, y_df_train, y_df_test
+
+    def preprocessing_after_train_test_split(
+        self,
+        X_df_train,
+        X_df_test,
+        y_df_train,
+        y_df_test,
+        downsampling_n_instances_train=None,
+        downsampling_n_instances_test=None,
+        normalize=False,
+        name_feature=False,
+    ):
+        """
+        preprocessing after train test split
+        """
+        # system behavior
+        system_behavior = self.system_behavior(normalize=normalize)
+
+        # stratify downsampling
+        if (
+            type(downsampling_n_instances_train) is int
+            and type(downsampling_n_instances_test) is int
+        ):
+            X_df_train, y_df_train = self.stratified_downsampling(
+                X_df=X_df_train,
+                y_df=y_df_train,
+                downsampling_n_instances=downsampling_n_instances_train,
+            )
+
+            X_df_test, y_df_test = self.stratified_downsampling(
+                X_df=X_df_test,
+                y_df=y_df_test,
+                downsampling_n_instances=downsampling_n_instances_test,
+            )
+
+        # convert to text and use prompt
+        if name_feature:
+            name_feature = X_df_train.columns
+
+        # normalize
+        if normalize:
+            X_df_train, X_df_test = self.normalization(
+                X_df_train=X_df_train, X_df_test=X_df_test
+            )
+
+        # convert to array
+        X_array_train, X_array_test, y_array_train, y_array_test = (
+            self.convert_to_array(X_df_train, X_df_test, y_df_train, y_df_test)
+        )
+
+        # convert to text and create prompt
+        train_datasets = self.convert_df_to_text(
+            X_array=X_array_train,
+            y_array=y_array_train,
+            name_feature=name_feature,
+            system_behavior=system_behavior,
+        )
+        test_datasets = self.convert_df_to_text(
+            X_array=X_array_test,
+            y_array=y_array_test,
+            name_feature=name_feature,
+            system_behavior=system_behavior,
+        )
+
+        return train_datasets, test_datasets
 
     def stratified_downsampling(
         self, X_df: pd.DataFrame, y_df: pd.DataFrame, downsampling_n_instances: int
@@ -104,7 +217,7 @@ class DataPreprocessing(DataAnalysis):
 
         return X_df_downsampling, y_df_downsampling
 
-    def train_test_split_dataset(self, X_df, y_df):
+    def train_test_split_dataset(self, X_df: pd.DataFrame, y_df: pd.DataFrame):
         """
         train test split with stratify y
         """
@@ -117,7 +230,7 @@ class DataPreprocessing(DataAnalysis):
         )
         return X_df_train, X_df_test, y_df_train, y_df_test
 
-    def normalization(self, X_df_train, X_df_test):
+    def normalization(self, X_df_train: pd.DataFrame, X_df_test: pd.DataFrame):
         """
         Normalize data with Min-Max-Scaler
         """
@@ -139,7 +252,7 @@ class DataPreprocessing(DataAnalysis):
         """
         return (np.array(arg) for arg in args)
 
-    def convert_df_to_text(self, X_array, y_array, name_feature, normalize=False):
+    def convert_df_to_text(self, X_array, y_array, name_feature, system_behavior):
         """
         convert array to text given the X, y and feature name
         """
@@ -189,21 +302,19 @@ class DataPreprocessing(DataAnalysis):
         formatted_data = [
             {
                 "text": self.create_prompt(
-                    question=d["question"], answer=d["answer"], normalize=normalize
+                    question=d["question"],
+                    answer=d["answer"],
+                    system_behavior=system_behavior,
                 )
             }
             for d in data_text_list_all_instances
         ]
 
-        for i in formatted_data:
-            print(i)
-            print()
+        return Dataset.from_list(formatted_data)
 
-        return formatted_data
-
-    def create_prompt(self, question, answer, normalize=False):
+    def create_prompt(self, question, answer, system_behavior):
         """create prompt using the syntax of llama-2"""
-        return f"<s>[INST] <<SYS>> {self.system_behavior(normalize=normalize)} <</SYS>> {question} [/INST] {answer} </s>"
+        return f"<s>[INST] <<SYS>> {system_behavior} <</SYS>> {question} [/INST] {answer} </s>"
 
     def system_behavior(self, normalize=False):
         """
@@ -236,14 +347,19 @@ if __name__ == "__main__":
 
     seed = 1998
     data_name = "HST"
-    hst = DataPreprocessing(data_name, seed=seed)
-    hst_data_dict = hst.create_text_dataset(
-        downsampling_n_instances=300, normalize=True
-    )
-    # data_name = "TEP"
-    # tep = DataAnalysis(data_name)
-    # extracted_label = [0, 1, 4, 5]
-    # tep_data_dict = tep.analysis(extracted_label=extracted_label, print_out=True)
-    # print("tep_data_dict:", tep_data_dict)
+    # hst = DataPreprocessing(data_name, seed=seed)
+    # hst_data_dict = hst.create_text_dataset(
+    #     downsampling_n_instances=300, normalize=True, name_feature=True
+    # )
 
-    # hst.system_behavior()
+    data_name = "TEP"
+
+    extracted_label = [0, 1, 4, 5]
+    tep = DataPreprocessing(data_name, seed=seed)
+    tep.create_text_dataset(
+        extracted_label=extracted_label,
+        normalize=True,
+        downsampling_n_instances_train=400,
+        downsampling_n_instances_test=160,
+        name_feature=True,
+    )
