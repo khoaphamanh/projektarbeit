@@ -6,8 +6,10 @@ import pandas as pd
 class DataAnalysis:
     def __init__(self, name_data):
         self.name_data = name_data
-        self.data_dir_path = os.path.dirname(os.path.abspath(__file__))
-        self.data_name_path = os.path.join(self.data_dir_path, self.name_data)
+        self.path_data_directory = os.path.dirname(os.path.abspath(__file__))
+        self.path_name_data_directory = os.path.join(
+            self.path_data_directory, self.name_data
+        )
         self.check_data()
 
     def check_data(self):
@@ -15,7 +17,7 @@ class DataAnalysis:
         check if data available, if not download data
         """
         # check if data available
-        if not os.path.exists(self.data_name_path):
+        if not os.path.exists(self.path_name_data_directory):
             import download_data
 
     def analysis(self, extracted_label=None, print_out=False):
@@ -23,7 +25,9 @@ class DataAnalysis:
         analysis the data, return the dict of name data, csv_files in dât, dataframe and its informations
         """
         # analysis data based on given data name (check if HST or TEP)
-        data_csv = sorted(i for i in os.listdir(self.data_name_path) if ".csv" in i)
+        data_csv = sorted(
+            i for i in os.listdir(self.path_name_data_directory) if ".csv" in i
+        )
         data_analysis_dict = {}
         for file_csv in data_csv:
             df = self.csv_analysis(
@@ -48,7 +52,7 @@ class DataAnalysis:
         dict_analysis = {}
 
         # read the csv files given, in this case is HSV
-        data_path = os.path.join(self.data_name_path, file_csv_name)
+        data_path = os.path.join(self.path_name_data_directory, file_csv_name)
         df = pd.read_csv(data_path)
 
         # name of the data csv
