@@ -1,17 +1,54 @@
-import os
-from analysis import DataAnalysis
+from .analysis import DataAnalysis
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
 from datasets import Dataset
 import pandas as pd
 import numpy as np
+import os
 
 
 class DataPreprocessing(DataAnalysis):
     def __init__(self, name_data, seed=1998):
         super().__init__(name_data)
+
+        # default parameters
         self.seed = seed
         self.train_size = 0.8
+
+    def load_data_llm_format(
+        self,
+        extracted_label=None,
+        normalize=False,
+        downsampling_n_instances=None,
+        downsampling_n_instances_train=None,
+        downsampling_n_instances_test=None,
+        name_feature=False,
+        save=False,
+    ):
+        """
+        load a saved dataset, not use for HPO
+        """
+        # path of train and test dataset
+        path_train_datasets = self.path_name_data_llm_format_directory(kind="train")
+        path_test_datasets = self.path_name_data_llm_format_directory(kind="train")
+
+        # load data if exsis
+        if os.path.exists(path_train_datasets) and os.path.exists(path_test_datasets):
+            train_datasets = Dataset.load_from_disk(path_train_datasets)
+            test_datasets = Dataset.load_from_disk(path_test_datasets)
+
+        else:
+            train_datasets, test_datasets = self.create_text_dataset(
+                extracted_label=extracted_label,
+                normalize=normalize,
+                downsampling_n_instances=downsampling_n_instances,
+                downsampling_n_instances_train=downsampling_n_instances_train,
+                downsampling_n_instances_test=downsampling_n_instances_test,
+                name_feature=name_feature,
+                save=save,
+            )
+
+        return train_datasets, test_datasets
 
     def create_text_dataset(
         self,
@@ -21,6 +58,7 @@ class DataPreprocessing(DataAnalysis):
         downsampling_n_instances_train=None,
         downsampling_n_instances_test=None,
         name_feature=False,
+        save=False,
     ):
         """
         load raw data as dataframe
@@ -92,8 +130,16 @@ class DataPreprocessing(DataAnalysis):
                 name_feature=name_feature,
             )
 
-        for i in test_datasets:
-            print(i)
+        # save the data llm format
+        if save:
+            train_datasets.save_to_disk(
+                dataset_path=self.path_name_data_llm_format_directory(kind="train")
+            )
+            test_datasets.save_to_disk(
+                dataset_path=self.path_name_data_llm_format_directory(kind="test")
+            )
+
+        return train_datasets, test_datasets
 
     def preprocessing_before_train_test_split(
         self,
@@ -343,6 +389,18 @@ class DataPreprocessing(DataAnalysis):
         )
         return system_behavior
 
+    def path_name_data_llm_format_directory(self, kind):
+        """
+        create path of saved data in llm format
+        """
+        name_data_llm_format_directory = (
+            f"{self.name_data}_{self.seed}_{kind}_llm_format"
+        )
+        path_name_data_llm_format_directory = os.path.join(
+            self.path_name_data_directory, name_data_llm_format_directory
+        )
+        return path_name_data_llm_format_directory
+
 
 if __name__ == "__main__":
 
@@ -359,22 +417,29 @@ if __name__ == "__main__":
     downsampling_n_instances_test = 160
 
     # load data
-    # data_name = "HST"
-    # hst = DataPreprocessing(data_name, seed=seed)
-    # hst_data_dict = hst.create_text_dataset(
-    #     downsampling_n_instances=300, normalize=True, name_feature=True
-    # )
+    data_name = "HST"
+    hst = DataPreprocessing(data_name, seed=seed)
+    hst_train, hst_test = hst.load_data_llm_format(
+        downsampling_n_instances=300, normalize=True, name_feature=True, save=True
+    )
+
+    for i in hst_test:
+        print(i)
 
     data_name = "TEP"
     extracted_label = [0, 1, 4, 5]
     tep = DataPreprocessing(data_name, seed=seed)
-    tep.create_text_dataset(
+    tep_train, tep_test = tep.load_data_llm_format(
         extracted_label=extracted_label,
         normalize=True,
         downsampling_n_instances_train=400,
         downsampling_n_instances_test=160,
         name_feature=True,
+        save=True,
     )
+
+    for i in tep_test:
+        print(i)
 
     end = default_timer()
     print(end - start)
