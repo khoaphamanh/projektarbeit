@@ -13,6 +13,7 @@ from trl import SFTTrainer
 import sys
 import os
 import torch
+from sklearn.metrics import accuracy_score
 
 # import preprocessing file
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -51,7 +52,7 @@ class LLM(DataPreprocessing):
         if quantized:
             use_4bit = True
             bnb_4bit_quant_type = "nf4"
-            compute_dtype = torch.float16()
+            compute_dtype = torch.float16
             bnb_config = BitsAndBytesConfig(
                 load_in_4bit=use_4bit,
                 bnb_4bit_compute_dtype=compute_dtype,
@@ -71,6 +72,8 @@ class LLM(DataPreprocessing):
 
         model.config.use_cache = False
         model.config.pretraining_tp = 1
+
+        return model
 
     def load_tokenizer(self):
         """
@@ -124,10 +127,141 @@ class LLM(DataPreprocessing):
 
         return train_datasets, test_datasets
 
-    def train(self):
+    def classification(
+        self,
+        lora_r,
+        lora_alpha,
+        lora_dropout,
+        extracted_label=None,
+        normalize=False,
+        downsampling_n_instances=None,
+        downsampling_n_instances_train=None,
+        downsampling_n_instances_test=None,
+        name_feature=False,
+        save=False,
+        quantized=False,
+        batch_size=32,
+        gradient_accumulation_steps=1,
+        learning_rate=0.0001,
+        weight_decay=0.001,
+        epochs=10,
+    ):
         """
         train llm model on dataset with llama-2 format
         """
+        # load data
+        train_datasets, test_datasets = self.load_data(
+            lora_r,
+            lora_alpha,
+            lora_dropout,
+            extracted_label=extracted_label,
+            normalize=normalize,
+            downsampling_n_instances=downsampling_n_instances,
+            downsampling_n_instances_train=downsampling_n_instances_train,
+            downsampling_n_instances_test=downsampling_n_instances_test,
+            name_feature=name_feature,
+            save=save,
+        )
+
+        # load model, tokenizer and lora config
+        model = self.load_model(quantized=quantized)
+        tokenizer = self.load_tokenizer()
+        peft_config = self.load_peft_config(
+            lora_r=lora_r, lora_alpha=lora_alpha, lora_dropout=lora_dropout
+        )
+
+        # optimizer
+        if quantized:
+            optim = "paged_adamw_32bit"
+        else:
+            optim = "adamw_torch"
+
+        # training arguments
+        logging_step = 1
+        num_train_epichs = 1
+        output_dir = "./results"
+        group_by_length = True
+
+        training_arguments = TrainingArguments(
+            output_dir=output_dir,
+            num_train_epochs=num_train_epichs,
+            per_device_train_batch_size=batch_size,
+            gradient_accumulation_steps=gradient_accumulation_steps,
+            optim=optim,
+            logging_steps=logging_step,
+            learning_rate=learning_rate,
+            group_by_length=group_by_length,
+            report_to="wandb",
+            run_name="llama-lora-experiment",
+        )
+
+        self.training_loop(
+            model=model,
+            epochs=epochs,
+            train_dataset=train_datasets,
+            test_dataset=test_datasets,
+            peft_config=peft_config,
+            tokenizer=tokenizer,
+            training_arguments=training_arguments,
+        )
+
+    def training_loop(
+        self,
+        model,
+        epochs,
+        train_dataset,
+        test_dataset,
+        peft_config,
+        tokenizer,
+        training_arguments: TrainingArguments,
+    ):
+        """
+        training loop
+        """
+        for ep in epochs:
+
+            # train the model
+            model.train()
+            trainer = SFTTrainer(
+                model=model,
+                train_dataset=train_dataset,
+                peft_config=peft_config,
+                dataset_text_field="text",
+                tokenizer=tokenizer,
+                args=training_arguments,
+            )
+
+            # evaluation
+            model.eval()
+            self.evaluation(model=model, datasets=train_dataset, tokenizer=tokenizer)
+            self.evaluation(model=model, datasets=test_dataset, tokenizer=tokenizer)
+
+    def evaluation(
+        self,
+        model,
+        datasets,
+        tokenizer,
+    ):
+        """
+        evaluation mode, only for check accuracy
+        """
+        model.eval()
+        with torch.no_grad():
+            for i in datasets:
+                question_prompt = i["question"]
+                print("question_prompt:", question_prompt)
+                inputs = tokenizer(question_prompt, return_tensors="pt").to(self.device)
+                output_ids = model.generate(
+                    **inputs,
+                    max_new_tokens=500,
+                    do_sample=False,
+                    temperature=0.0,
+                    top_p=1.0
+                )
+                response = tokenizer.decode(output_ids[0], skip_special_tokens=True)
+                print("response:", response)
+                answer = i["answer"]
+                print("answer:", answer)
 
 
 # run this script
@@ -135,6 +269,6 @@ if __name__ == "__main__":
 
     name_data = "HST"
     seed = 1998
-    llm = LLM(name_data=name_data, seed=seed)
-    path_models_directory = llm.path_models_directory
+    llm_hst = LLM(name_data=name_data, seed=seed)
+    path_models_directory = llm_hst.path_models_directory
     print("path_models_directory:", path_models_directory)
