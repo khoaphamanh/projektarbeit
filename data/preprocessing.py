@@ -1,4 +1,4 @@
-from .analysis import DataAnalysis
+from analysis import DataAnalysis
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
 from datasets import Dataset
@@ -352,16 +352,21 @@ class DataPreprocessing(DataAnalysis):
                     question=d["question"],
                     answer=d["answer"],
                     system_behavior=system_behavior,
-                )
+                ),
+                "question": self.create_prompt(question=d["question"]),
+                "answer": d["answer"],
             }
             for d in data_text_list_all_instances
         ]
 
         return Dataset.from_list(formatted_data)
 
-    def create_prompt(self, question, answer, system_behavior):
+    def create_prompt(self, question, answer=None, system_behavior=None):
         """create prompt using the syntax of llama-2"""
-        return f"<s>[INST] <<SYS>> {system_behavior} <</SYS>> {question} [/INST] {answer} </s>"
+        if answer is not None and system_behavior is not None:
+            return f"<s>[INST] <<SYS>> {system_behavior} <</SYS>> {question} [/INST] {answer} </s>"
+        else:
+            return f"<s>[INST] {question} [/INST]"
 
     def system_behavior(self, normalize=False):
         """
@@ -423,8 +428,8 @@ if __name__ == "__main__":
         downsampling_n_instances=300, normalize=True, name_feature=True, save=True
     )
 
-    for i in hst_test:
-        print(i)
+    # for i in hst_test:
+    #     print(i)
 
     data_name = "TEP"
     extracted_label = [0, 1, 4, 5]
@@ -440,6 +445,34 @@ if __name__ == "__main__":
 
     for i in tep_test:
         print(i)
+
+    # import re
+    # def extract_question_answer(example):
+    #     """
+    #     Extracts the question (inside [INST] ... [/INST]) and the answer (after [/INST])
+    #     """
+    #     pattern = r"\[INST\](.*?)\[/INST\](.*)"
+    #     match = re.search(pattern, example["text"], re.DOTALL)
+
+    #     if match:
+    #         question = match.group(1).strip()  # Extract the text inside [INST]
+    #         answer = match.group(2).strip()  # Extract text after [/INST]
+
+    #         # Remove the <<SYS>> and <</SYS>> system instructions (optional)
+    #         question = re.sub(
+    #             r"<<SYS>>.*?<</SYS>>", "", question, flags=re.DOTALL
+    #         ).strip()
+
+    #         return {"question": question, "answer": answer}
+    #     else:
+    #         return {"question": None, "answer": None}
+
+    # split_dataset = tep_test.map(extract_question_answer)
+
+    # for i in split_dataset:
+    #     print(i.keys())
+    #     print(i)
+    #     break
 
     end = default_timer()
     print(end - start)
