@@ -8,12 +8,18 @@ from transformers import (
     pipeline,
     logging,
 )
+import transformers
 from peft import LoraConfig
 from trl import SFTTrainer
 import sys
 import os
 import torch
 from sklearn.metrics import accuracy_score
+from tqdm import tqdm
+from torch.utils.data import DataLoader
+from timeit import default_timer
+import random
+import numpy as np
 
 # import preprocessing file
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -88,6 +94,8 @@ class LLM(DataPreprocessing):
         # Set padding direction
         tokenizer.padding_side = "right"
 
+        return tokenizer
+
     def load_peft_config(self, lora_r, lora_alpha, lora_dropout):
         """
         load LoRA Config
@@ -129,9 +137,9 @@ class LLM(DataPreprocessing):
 
     def classification(
         self,
-        lora_r,
-        lora_alpha,
-        lora_dropout,
+        lora_r=8,
+        lora_alpha=32,
+        lora_dropout=0.1,
         extracted_label=None,
         normalize=False,
         downsampling_n_instances=None,
@@ -140,7 +148,7 @@ class LLM(DataPreprocessing):
         name_feature=False,
         save=False,
         quantized=False,
-        batch_size=32,
+        batch_size=1,
         gradient_accumulation_steps=1,
         learning_rate=0.0001,
         weight_decay=0.001,
@@ -151,9 +159,6 @@ class LLM(DataPreprocessing):
         """
         # load data
         train_datasets, test_datasets = self.load_data(
-            lora_r,
-            lora_alpha,
-            lora_dropout,
             extracted_label=extracted_label,
             normalize=normalize,
             downsampling_n_instances=downsampling_n_instances,
@@ -179,20 +184,28 @@ class LLM(DataPreprocessing):
         # training arguments
         logging_step = 1
         num_train_epichs = 1
-        output_dir = "./results"
+        output_dir = f"./results_{self.name_data}"
         group_by_length = True
+
+        fp16 = True
+        print("fp16:", fp16)
+        bf16 = False
+        print("bf16:", bf16)
 
         training_arguments = TrainingArguments(
             output_dir=output_dir,
-            num_train_epochs=num_train_epichs,
+            num_train_epochs=10,
             per_device_train_batch_size=batch_size,
             gradient_accumulation_steps=gradient_accumulation_steps,
             optim=optim,
             logging_steps=logging_step,
             learning_rate=learning_rate,
             group_by_length=group_by_length,
-            report_to="wandb",
-            run_name="llama-lora-experiment",
+            lr_scheduler_type="constant",
+            fp16=fp16,
+            bf16=bf16,
+            # report_to="wandb",
+            # run_name="llama-lora-experiment",
         )
 
         self.training_loop(
@@ -218,23 +231,27 @@ class LLM(DataPreprocessing):
         """
         training loop
         """
-        for ep in epochs:
+        # for ep in range(epochs):
 
-            # train the model
-            model.train()
-            trainer = SFTTrainer(
-                model=model,
-                train_dataset=train_dataset,
-                peft_config=peft_config,
-                dataset_text_field="text",
-                tokenizer=tokenizer,
-                args=training_arguments,
-            )
+        # print("epoch", ep)
 
-            # evaluation
-            model.eval()
-            self.evaluation(model=model, datasets=train_dataset, tokenizer=tokenizer)
-            self.evaluation(model=model, datasets=test_dataset, tokenizer=tokenizer)
+        # train the model
+        model.train()
+        trainer = SFTTrainer(
+            model=model,
+            train_dataset=train_dataset,
+            eval_dataset=test_dataset,
+            peft_config=peft_config,
+            dataset_text_field="text",
+            tokenizer=tokenizer,
+            args=training_arguments,
+        )
+        trainer.train()  # resume_from_checkpoint=True
+
+        # evaluation
+        model.eval()
+        self.evaluation(model=model, datasets=train_dataset, tokenizer=tokenizer)
+        self.evaluation(model=model, datasets=test_dataset, tokenizer=tokenizer)
 
     def evaluation(
         self,
@@ -246,22 +263,46 @@ class LLM(DataPreprocessing):
         evaluation mode, only for check accuracy
         """
         model.eval()
-        with torch.no_grad():
-            for i in datasets:
-                question_prompt = i["question"]
-                print("question_prompt:", question_prompt)
-                inputs = tokenizer(question_prompt, return_tensors="pt").to(self.device)
+        dataloader = DataLoader(dataset=datasets, batch_size=8, shuffle=False)
+
+        start = default_timer()
+
+        with torch.inference_mode():
+            for idx, batch in tqdm(
+                enumerate(dataloader), desc="Processing", unit="batch"
+            ):
+                question_prompts = batch["question"]  # Get batch of questions
+
+                # Tokenize entire batch at once (instead of looping one-by-one)
+                inputs = tokenizer(
+                    question_prompts, return_tensors="pt", padding=True, truncation=True
+                ).to(self.device)
+
+                # Generate responses for entire batch at once
                 output_ids = model.generate(
                     **inputs,
-                    max_new_tokens=500,
+                    max_new_tokens=10,
                     do_sample=False,
-                    temperature=0.0,
-                    top_p=1.0
+                    top_p=1.0,
                 )
-                response = tokenizer.decode(output_ids[0], skip_special_tokens=True)
-                print("response:", response)
-                answer = i["answer"]
-                print("answer:", answer)
+
+                # Decode responses
+                responses = tokenizer.batch_decode(
+                    output_ids,
+                    skip_special_tokens=True,
+                    clean_up_tokenization_spaces=True,
+                )
+
+                # Print results
+                for idx, response in enumerate(responses):
+                    print(f"Sample {idx}:")
+                    print("Question:", question_prompts[idx])
+                    print("Response:", response)
+                    print("Answer:", batch["answer"][idx])
+
+        end = default_timer()
+        duration = end - start
+        print("duration:", duration)
 
 
 # run this script
@@ -269,6 +310,28 @@ if __name__ == "__main__":
 
     name_data = "HST"
     seed = 1998
+
+    def set_random_seed(seed=42):
+        """
+        Sets the random seed for reproducibility in PyTorch, NumPy, and Python's random module.
+        Also ensures CUDA determinism if GPU is available.
+        """
+        random.seed(seed)  # Python random seed
+        np.random.seed(seed)  # NumPy random seed
+        torch.manual_seed(seed)  # PyTorch random seed
+        transformers.set_seed(seed)
+
+        # Check if CUDA is available
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(seed)  # Set CUDA seed
+            torch.cuda.manual_seed_all(seed)  # If multi-GPU, set for all GPUs
+            torch.backends.cudnn.deterministic = True  # Ensure deterministic behavior
+            torch.backends.cudnn.benchmark = (
+                False  # Disable CUDNN benchmarking for reproducibility
+            )
+
+    set_random_seed(seed=seed)
+
     llm_hst = LLM(name_data=name_data, seed=seed)
-    path_models_directory = llm_hst.path_models_directory
-    print("path_models_directory:", path_models_directory)
+
+    llm_hst.classification(quantized=False)
