@@ -1,4 +1,4 @@
-from analysis import DataAnalysis
+from .analysis import DataAnalysis
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
 from datasets import Dataset
@@ -443,9 +443,17 @@ if __name__ == "__main__":
         save=True,
     )
 
-    for i in tep_test:
-        print(i)
+    # for i in tep_test:
+    #     print(i)
+    #     break
 
+    from torch.utils.data import DataLoader
+
+    dataloader = DataLoader(tep_test, batch_size=2, shuffle=False)
+    for X in dataloader:
+        print("Datalaodereretewt")
+        print(X)
+        break
     # import re
     # def extract_question_answer(example):
     #     """
