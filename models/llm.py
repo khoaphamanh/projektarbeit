@@ -20,6 +20,9 @@ from torch.utils.data import DataLoader
 from timeit import default_timer
 import random
 import numpy as np
+import re
+
+# import neptune
 
 # import preprocessing file
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -152,7 +155,7 @@ class LLM(DataPreprocessing):
         gradient_accumulation_steps=1,
         learning_rate=0.0001,
         weight_decay=0.001,
-        epochs=10,
+        epochs=1,
     ):
         """
         train llm model on dataset with llama-2 format
@@ -188,24 +191,25 @@ class LLM(DataPreprocessing):
         group_by_length = True
 
         fp16 = True
-        print("fp16:", fp16)
         bf16 = False
-        print("bf16:", bf16)
+        lr_scheduler_type = "constant"
 
         training_arguments = TrainingArguments(
             output_dir=output_dir,
-            num_train_epochs=10,
+            num_train_epochs=epochs,
             per_device_train_batch_size=batch_size,
             gradient_accumulation_steps=gradient_accumulation_steps,
             optim=optim,
             logging_steps=logging_step,
+            eval_steps=logging_step,
             learning_rate=learning_rate,
             group_by_length=group_by_length,
             lr_scheduler_type="constant",
             fp16=fp16,
             bf16=bf16,
-            # report_to="wandb",
-            # run_name="llama-lora-experiment",
+            report_to="wandb",
+            seed=self.seed,
+            run_name=f"llama-lora-{self.name_data}",
         )
 
         self.training_loop(
@@ -262,16 +266,23 @@ class LLM(DataPreprocessing):
         """
         evaluation mode, only for check accuracy
         """
-        model.eval()
+        # total instance
+        y_true_total = []
+        y_pred_total = []
+
+        # dataloader for faster training
         dataloader = DataLoader(dataset=datasets, batch_size=8, shuffle=False)
 
-        start = default_timer()
+        # model in evaluation mode
+        model.eval()
 
+        start = default_timer()
         with torch.inference_mode():
             for idx, batch in tqdm(
                 enumerate(dataloader), desc="Processing", unit="batch"
             ):
                 question_prompts = batch["question"]  # Get batch of questions
+                answers = batch["answer"]
 
                 # Tokenize entire batch at once (instead of looping one-by-one)
                 inputs = tokenizer(
@@ -292,6 +303,13 @@ class LLM(DataPreprocessing):
                     skip_special_tokens=True,
                     clean_up_tokenization_spaces=True,
                 )
+                print("responses:", responses)
+
+                y_true = self.extract_label_from_response(list_strings=responses)
+                y_true_total = y_true_total + y_true
+
+                y_pred = self.extract_label_from_response(list_strings=answers)
+                y_pred_total = y_pred_total + y_pred
 
                 # Print results
                 for idx, response in enumerate(responses):
@@ -300,9 +318,32 @@ class LLM(DataPreprocessing):
                     print("Response:", response)
                     print("Answer:", batch["answer"][idx])
 
+        print("y_true_total:", y_true_total)
+        print("y_pred_total:", y_pred_total)
+        accuracy = self.calculate_accuracy_y_text_list(
+            y_true=y_true_total, y_pred=y_true_total
+        )
+        print("accuracy:", accuracy)
         end = default_timer()
         duration = end - start
         print("duration:", duration)
+
+    def extract_label_from_response(self, list_strings):
+        """
+        use re to extract the label from the list of response or answer
+        """
+        # Regular expression to match "Y =" followed by any number (integer or float)
+        list_match = [re.search(r"Y\s*=\s*(-?\d+(\.\d+)?)", i) for i in list_strings]
+        list_y = [i.group() for i in list_match]
+        return list_y
+
+    def calculate_accuracy_y_text_list(self, y_true, y_pred):
+        """
+        calculate accuracy
+        """
+        correct = sum(1 for true, pred in zip(y_true, y_pred) if true == pred)
+        accuracy = (correct / len(y_true)) * 100
+        return accuracy
 
 
 # run this script
