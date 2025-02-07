@@ -155,7 +155,7 @@ class LLM(DataPreprocessing):
         gradient_accumulation_steps=1,
         learning_rate=0.0001,
         weight_decay=0.001,
-        epochs=1,
+        epochs=10,
     ):
         """
         train llm model on dataset with llama-2 format
@@ -195,21 +195,27 @@ class LLM(DataPreprocessing):
         lr_scheduler_type = "constant"
 
         training_arguments = TrainingArguments(
+            # configuration parameters
             output_dir=output_dir,
-            num_train_epochs=epochs,
-            per_device_train_batch_size=batch_size,
+            report_to="wandb",
             gradient_accumulation_steps=gradient_accumulation_steps,
             optim=optim,
-            logging_steps=logging_step,
-            eval_steps=logging_step,
             learning_rate=learning_rate,
             group_by_length=group_by_length,
-            lr_scheduler_type="constant",
+            lr_scheduler_type=lr_scheduler_type,
             fp16=fp16,
             bf16=bf16,
-            report_to="wandb",
             seed=self.seed,
             run_name=f"llama-lora-{self.name_data}",
+            # weight_decay=weight_decay
+            # train parameters
+            num_train_epochs=epochs,
+            per_device_train_batch_size=batch_size,
+            logging_steps=logging_step,
+            # val parameters
+            eval_steps=logging_step,
+            eval_strategy="steps",
+            metric_for_best_model="eval_loss",
         )
 
         self.training_loop(
@@ -237,7 +243,12 @@ class LLM(DataPreprocessing):
         """
         # for ep in range(epochs):
 
-        # print("epoch", ep)
+        # # print("epoch", ep)
+        initial_params = {
+            name: param.clone().detach().cpu()
+            for name, param in model.named_parameters()
+            if param.requires_grad
+        }
 
         # train the model
         model.train()
@@ -252,10 +263,37 @@ class LLM(DataPreprocessing):
         )
         trainer.train()  # resume_from_checkpoint=True
 
+        updated_params = {
+            name: param.clone().detach().cpu()
+            for name, param in model.named_parameters()
+            if param.requires_grad
+        }
+
+        # Compare parameter differences
+        for name in initial_params:
+            if not torch.equal(initial_params[name], updated_params[name]):
+                print(f"✅ Model parameter '{name}' was updated during training.")
+            else:
+                print(f"⚠️ Model parameter '{name}' was NOT updated.")
+
         # evaluation
         model.eval()
         self.evaluation(model=model, datasets=train_dataset, tokenizer=tokenizer)
         self.evaluation(model=model, datasets=test_dataset, tokenizer=tokenizer)
+
+        updated_params = {
+            name: param.clone().detach().cpu()
+            for name, param in model.named_parameters()
+            if param.requires_grad
+        }
+
+        # # Compare parameter differences
+        print("check in eval")
+        for name in initial_params:
+            if not torch.equal(initial_params[name], updated_params[name]):
+                print(f"✅ Model parameter '{name}' was updated during training.")
+            else:
+                print(f"⚠️ Model parameter '{name}' was NOT updated.")
 
     def evaluation(
         self,
@@ -271,7 +309,8 @@ class LLM(DataPreprocessing):
         y_pred_total = []
 
         # dataloader for faster training
-        dataloader = DataLoader(dataset=datasets, batch_size=4, shuffle=False)
+        dataloader = DataLoader(dataset=datasets, batch_size=8, shuffle=False)
+        print("dataloader:", dataloader)
 
         # model in evaluation mode
         model.eval()
@@ -305,10 +344,10 @@ class LLM(DataPreprocessing):
                 )
                 print("responses:", responses)
 
-                y_true = self.extract_label_from_response(list_strings=responses)
+                y_true = self.extract_label_from_response(list_strings=answers)
                 y_true_total = y_true_total + y_true
 
-                y_pred = self.extract_label_from_response(list_strings=answers)
+                y_pred = self.extract_label_from_response(list_strings=responses)
                 y_pred_total = y_pred_total + y_pred
 
                 # Print results
@@ -321,7 +360,7 @@ class LLM(DataPreprocessing):
         print("y_true_total:", y_true_total)
         print("y_pred_total:", y_pred_total)
         accuracy = self.calculate_accuracy_y_text_list(
-            y_true=y_true_total, y_pred=y_true_total
+            y_true=y_true_total, y_pred=y_pred_total
         )
         print("accuracy:", accuracy)
         end = default_timer()
@@ -349,7 +388,7 @@ class LLM(DataPreprocessing):
 # run this script
 if __name__ == "__main__":
 
-    name_data = "TEP"
+    name_data = "HST"
     seed = 1998
 
     def set_random_seed(seed=42):
