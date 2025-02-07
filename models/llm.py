@@ -271,7 +271,7 @@ class LLM(DataPreprocessing):
         y_pred_total = []
 
         # dataloader for faster training
-        dataloader = DataLoader(dataset=datasets, batch_size=8, shuffle=False)
+        dataloader = DataLoader(dataset=datasets, batch_size=4, shuffle=False)
 
         # model in evaluation mode
         model.eval()
@@ -292,7 +292,7 @@ class LLM(DataPreprocessing):
                 # Generate responses for entire batch at once
                 output_ids = model.generate(
                     **inputs,
-                    max_new_tokens=10,
+                    max_new_tokens=5,
                     do_sample=False,
                     top_p=1.0,
                 )
@@ -300,8 +300,8 @@ class LLM(DataPreprocessing):
                 # Decode responses
                 responses = tokenizer.batch_decode(
                     output_ids,
-                    skip_special_tokens=True,
-                    clean_up_tokenization_spaces=True,
+                    # skip_special_tokens=True,
+                    # clean_up_tokenization_spaces=True,
                 )
                 print("responses:", responses)
 
@@ -334,7 +334,7 @@ class LLM(DataPreprocessing):
         """
         # Regular expression to match "Y =" followed by any number (integer or float)
         list_match = [re.search(r"Y\s*=\s*(-?\d+(\.\d+)?)", i) for i in list_strings]
-        list_y = [i.group() for i in list_match]
+        list_y = [i.group() if i else "none" for i in list_match]
         return list_y
 
     def calculate_accuracy_y_text_list(self, y_true, y_pred):
@@ -349,7 +349,7 @@ class LLM(DataPreprocessing):
 # run this script
 if __name__ == "__main__":
 
-    name_data = "HST"
+    name_data = "TEP"
     seed = 1998
 
     def set_random_seed(seed=42):
