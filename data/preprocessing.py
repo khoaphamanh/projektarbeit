@@ -30,10 +30,14 @@ class DataPreprocessing(DataAnalysis):
         """
         # path of train and test dataset
         path_train_datasets = self.path_name_data_llm_format_directory(kind="train")
-        path_test_datasets = self.path_name_data_llm_format_directory(kind="train")
+        path_test_datasets = self.path_name_data_llm_format_directory(kind="test")
 
         # load data if exsis
-        if os.path.exists(path_train_datasets) and os.path.exists(path_test_datasets):
+        if (
+            os.path.exists(path_train_datasets)
+            and os.path.exists(path_test_datasets)
+            and save == True
+        ):
             train_datasets = Dataset.load_from_disk(path_train_datasets)
             test_datasets = Dataset.load_from_disk(path_test_datasets)
 
@@ -428,6 +432,9 @@ if __name__ == "__main__":
         downsampling_n_instances=300, normalize=True, name_feature=True, save=True
     )
 
+    # print("hst_train len:", len(hst_train))
+    # print("hst_test len:", len(hst_test))
+
     # for i in hst_test:
     #     print(i)
 
@@ -447,13 +454,16 @@ if __name__ == "__main__":
     #     print(i)
     #     break
 
+    print(len(tep_train))
+    print(len(tep_test))
+
     from torch.utils.data import DataLoader
 
-    dataloader = DataLoader(tep_test, batch_size=2, shuffle=False)
-    for X in dataloader:
-        print("Datalaodereretewt")
-        print(X)
-        break
+    # dataloader = DataLoader(tep_test, batch_size=2, shuffle=False)
+    # for X in dataloader:
+    #     print("Datalaodereretewt")
+    #     print(X)
+    #     break
     # import re
     # def extract_question_answer(example):
     #     """
