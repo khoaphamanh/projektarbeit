@@ -21,6 +21,7 @@ from timeit import default_timer
 import random
 import numpy as np
 import re
+import wandb
 
 # import neptune
 
@@ -42,16 +43,22 @@ class LLM(DataPreprocessing):
         # device
         self.device_map = "auto"
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.gpus = []
+
         if torch.cuda.is_available():
-            self.gpu_name = torch.cuda.get_device_name(0)
-            self.n_gpus = torch.cuda.device_count()
-            self.vram = (
-                torch.cuda.get_device_properties(0).total_memory / 1024 / 1024 / 1024
-            )
+            n_gpus = torch.cuda.device_count()
+            for i in range(n_gpus):
+                props = torch.cuda.get_device_properties(i)
+                gpu_info = {
+                    "id": i,
+                    "name": torch.cuda.get_device_name(i),
+                    "vram_gb": round(props.total_memory / 1024 / 1024 / 1024, 2),
+                }
+                self.gpus.append(gpu_info)
         else:
-            self.gpu_name = None
-            self.n_gpus = None
-            self.vram = None
+            self.gpus = None
+        print("self.gpus: ", self.gpus)
+        self.n_gpus = len(gpu_info)
 
     def load_model(self, quantized=False):
         """
@@ -138,6 +145,12 @@ class LLM(DataPreprocessing):
 
         return train_datasets, test_datasets
 
+    def hyperparameters_configuration_dict(self, **kwargs):
+        """
+        hyperparameter dictionary
+        """
+        return kwargs
+
     def classification(
         self,
         lora_r=8,
@@ -177,6 +190,8 @@ class LLM(DataPreprocessing):
         peft_config = self.load_peft_config(
             lora_r=lora_r, lora_alpha=lora_alpha, lora_dropout=lora_dropout
         )
+        for name, param in model.named_parameters():
+            print(f"Parameter: {name}, Device: {param.device}")
 
         # optimizer
         if quantized:
@@ -192,7 +207,59 @@ class LLM(DataPreprocessing):
 
         fp16 = True
         bf16 = False
-        lr_scheduler_type = "constant"
+        lr_scheduler_type = "cosine"  # "constant"
+
+        # print the params
+        total_params = sum(p.numel() for p in model.parameters())
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+        # init wandb
+        project = "projektarbeit_khoa_quy"
+        name = f"llama-lora-{self.name_data}"
+        hyperparameters_model = self.hyperparameters_configuration_dict(
+            learning_rate=learning_rate,
+            quantized=quantized,
+            lora_r=lora_r,
+            lora_alpha=lora_alpha,
+            lora_dropout=lora_dropout,
+            batch_size=batch_size,
+            gradient_accumulation_steps=gradient_accumulation_steps,
+            learning_rate=learning_rate,
+            epochs=epochs,
+        )
+
+        configurations = self.gpus.copy()
+        configurations["n_gpus"] = self.n_gpus
+        configurations["n_params"] = total_params
+        configurations["n_params_trainable"] = trainable_params
+        configurations["seed"] = self.seed
+        configurations["name_model"] = self.name_model_llama_2
+
+        n_instances_train = len(train_datasets)
+        n_instances_test = len(test_datasets)
+        hyperparameters_data = self.hyperparameters_configuration_dict(
+            name_data=self.name_data,
+            extracted_label=extracted_label,
+            normalize=normalize,
+            downsampling_n_instances=downsampling_n_instances,
+            downsampling_n_instances_train=downsampling_n_instances_train,
+            downsampling_n_instances_test=downsampling_n_instances_test,
+            name_feature=name_feature,
+            save=save,
+            n_instances_train=n_instances_train,
+            n_instances_test=n_instances_test,
+            n_batch_train=np.ceil(n_instances_train / batch_size),
+            n_batch_test=np.ceil(n_instances_test / batch_size),
+        )
+
+        wandb.init(project=project, name=name)
+        wandb.config.update(
+            {
+                "hyperparameters_model": hyperparameters_model,
+                "configurations": configurations,
+                "hyperparameters_data": hyperparameters_data,
+            }
+        )
 
         training_arguments = TrainingArguments(
             # configuration parameters
@@ -207,7 +274,6 @@ class LLM(DataPreprocessing):
             bf16=bf16,
             seed=self.seed,
             run_name=f"llama-lora-{self.name_data}",
-            # weight_decay=weight_decay
             # train parameters
             num_train_epochs=epochs,
             per_device_train_batch_size=batch_size,
@@ -243,13 +309,6 @@ class LLM(DataPreprocessing):
         """
         # for ep in range(epochs):
 
-        # # print("epoch", ep)
-        initial_params = {
-            name: param.clone().detach().cpu()
-            for name, param in model.named_parameters()
-            if param.requires_grad
-        }
-
         # train the model
         model.train()
         trainer = SFTTrainer(
@@ -263,37 +322,51 @@ class LLM(DataPreprocessing):
         )
         trainer.train()  # resume_from_checkpoint=True
 
-        updated_params = {
-            name: param.clone().detach().cpu()
-            for name, param in model.named_parameters()
-            if param.requires_grad
-        }
+        # print the params
+        total_params = sum(p.numel() for p in model.parameters())
+        print("total_params:", total_params)
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        print("trainable_params:", trainable_params)
 
-        # Compare parameter differences
-        for name in initial_params:
-            if not torch.equal(initial_params[name], updated_params[name]):
-                print(f"✅ Model parameter '{name}' was updated during training.")
-            else:
-                print(f"⚠️ Model parameter '{name}' was NOT updated.")
+        # # print("epoch", ep)
+        # initial_params = {
+        #     name: param.clone().detach().cpu()
+        #     for name, param in model.named_parameters()
+        #     if param.requires_grad
+        # }
+        # print("initial_params:", initial_params)
 
-        # evaluation
-        model.eval()
-        self.evaluation(model=model, datasets=train_dataset, tokenizer=tokenizer)
-        self.evaluation(model=model, datasets=test_dataset, tokenizer=tokenizer)
-
-        updated_params = {
-            name: param.clone().detach().cpu()
-            for name, param in model.named_parameters()
-            if param.requires_grad
-        }
+        # updated_params = {
+        #     name: param.clone().detach().cpu()
+        #     for name, param in model.named_parameters()
+        #     if param.requires_grad
+        # }
 
         # # Compare parameter differences
-        print("check in eval")
-        for name in initial_params:
-            if not torch.equal(initial_params[name], updated_params[name]):
-                print(f"✅ Model parameter '{name}' was updated during training.")
-            else:
-                print(f"⚠️ Model parameter '{name}' was NOT updated.")
+        # for name in initial_params:
+        #     if not torch.equal(initial_params[name], updated_params[name]):
+        #         print(f"✅ Model parameter '{name}' was updated during training.")
+        #     else:
+        #         print(f"⚠️ Model parameter '{name}' was NOT updated.")
+
+        # # evaluation
+        # model.eval()
+        # self.evaluation(model=model, datasets=train_dataset, tokenizer=tokenizer)
+        # self.evaluation(model=model, datasets=test_dataset, tokenizer=tokenizer)
+
+        # updated_params = {
+        #     name: param.clone().detach().cpu()
+        #     for name, param in model.named_parameters()
+        #     if param.requires_grad
+        # }
+
+        # # # Compare parameter differences
+        # print("check in eval")
+        # for name in initial_params:
+        #     if not torch.equal(initial_params[name], updated_params[name]):
+        #         print(f"✅ Model parameter '{name}' was updated during training.")
+        #     else:
+        #         print(f"⚠️ Model parameter '{name}' was NOT updated.")
 
     def evaluation(
         self,
@@ -412,6 +485,42 @@ if __name__ == "__main__":
 
     set_random_seed(seed=seed)
 
+    # init llm hst
     llm_hst = LLM(name_data=name_data, seed=seed)
 
-    llm_hst.classification(quantized=False)
+    # hyperparameters
+    lora_r = 8
+    lora_alpha = 32
+    lora_dropout = 0.1
+    extracted_label = None
+    normalize = True
+    downsampling_n_instances = 300
+    downsampling_n_instances_train = None
+    downsampling_n_instances_test = None
+    name_feature = True
+    save = True
+    quantized = True
+    batch_size = 1
+    gradient_accumulation_steps = 1
+    learning_rate = 0.0001
+    weight_decay = 0.001
+    epochs = 10
+
+    llm_hst.classification(
+        lora_r=lora_r,
+        lora_alpha=lora_alpha,
+        lora_dropout=lora_dropout,
+        extracted_label=extracted_label,
+        normalize=normalize,
+        downsampling_n_instances=downsampling_n_instances,
+        downsampling_n_instances_train=downsampling_n_instances_train,
+        downsampling_n_instances_test=downsampling_n_instances_test,
+        name_feature=name_feature,
+        save=save,
+        quantized=quantized,
+        batch_size=batch_size,
+        gradient_accumulation_steps=gradient_accumulation_steps,
+        learning_rate=learning_rate,
+        weight_decay=weight_decay,
+        epochs=epochs,
+    )
