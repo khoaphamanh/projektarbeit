@@ -1,4 +1,9 @@
 import os
+
+# Set environment variable before torch is imported
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
+
 from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
@@ -7,6 +12,10 @@ from transformers import (
     TrainingArguments,
     pipeline,
     logging,
+    TrainerCallback,
+    TrainerControl,
+    TrainerState,
+    Trainer,
 )
 import transformers
 from peft import LoraConfig
@@ -22,8 +31,7 @@ import random
 import numpy as np
 import re
 import wandb
-
-# import neptune
+from datetime import datetime
 
 # import preprocessing file
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -44,7 +52,7 @@ class LLM(DataPreprocessing):
         self.device_map = "auto"
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.gpus = []
-
+        self.total_vram = 0
         if torch.cuda.is_available():
             n_gpus = torch.cuda.device_count()
             for i in range(n_gpus):
@@ -55,6 +63,9 @@ class LLM(DataPreprocessing):
                     "vram_gb": round(props.total_memory / 1024 / 1024 / 1024, 2),
                 }
                 self.gpus.append(gpu_info)
+                self.total_vram = self.total_vram + round(
+                    props.total_memory / 1024 / 1024 / 1024, 2
+                )
         else:
             self.gpus = None
         print("self.gpus: ", self.gpus)
@@ -88,6 +99,7 @@ class LLM(DataPreprocessing):
 
         model.config.use_cache = False
         model.config.pretraining_tp = 1
+        # model.gradient_checkpointing_enable()
 
         return model
 
@@ -120,7 +132,7 @@ class LLM(DataPreprocessing):
 
         return peft_config
 
-    def load_data(
+    def load_data_llm(
         self,
         extracted_label=None,
         normalize=False,
@@ -133,23 +145,80 @@ class LLM(DataPreprocessing):
         """
         load data in llama-2 format
         """
-        train_datasets, test_datasets = self.load_data_llm_format(
+        train_datasets, test_datasets = self.load_data(
             extracted_label=extracted_label,
             normalize=normalize,
             downsampling_n_instances=downsampling_n_instances,
             downsampling_n_instances_train=downsampling_n_instances_train,
             downsampling_n_instances_test=downsampling_n_instances_test,
             name_feature=name_feature,
+            convert_to_text=True,
             save=save,
         )
 
         return train_datasets, test_datasets
+
+    def create_name(self):
+        """
+        create name based on datetime and name data
+        """
+        name = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        name = f"{self.name_data}_{name}"
+
+        return name
 
     def hyperparameters_configuration_dict(self, **kwargs):
         """
         hyperparameter dictionary
         """
         return kwargs
+
+    def custom_accuracy(self, eval_preds):
+        """
+        Calculate custom accuracy for predictions during training.
+        """
+        tokenizer = self.load_tokenizer()
+
+        predictions, labels = eval_preds
+
+        # Convert to numpy if tensor
+        if isinstance(predictions, torch.Tensor):
+            predictions = predictions.argmax(dim=-1).cpu().numpy()
+        else:
+            predictions = np.array(predictions)
+
+        if isinstance(labels, torch.Tensor):
+            labels = labels.cpu().numpy()
+        else:
+            labels = np.array(labels)
+
+        # Sanity check: ensure 2D structure
+        if predictions.ndim == 3:
+            # shape: [batch, seq, vocab] → [batch, seq]
+            predictions = predictions.argmax(axis=-1)
+
+        if labels.ndim == 3:
+            labels = labels.argmax(axis=-1)
+
+        # Replace -100 with pad_token_id
+        labels = np.where(labels == -100, tokenizer.pad_token_id, labels)
+
+        # Convert to lists of token IDs
+        predictions = predictions.tolist()
+        labels = labels.tolist()
+
+        # Decode predictions and labels
+        decoded_preds = tokenizer.batch_decode(predictions, skip_special_tokens=True)
+        decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
+
+        # Extract labels
+        y_pred = self.extract_label_from_response(decoded_preds)
+        y_true = self.extract_label_from_response(decoded_labels)
+
+        # Accuracy
+        acc = self.calculate_accuracy_y_text_list(y_true=y_true, y_pred=y_pred)
+
+        return {"custom_accuracy": acc}
 
     def classification(
         self,
@@ -173,8 +242,17 @@ class LLM(DataPreprocessing):
         """
         train llm model on dataset with llama-2 format
         """
+        # control batchsize for suitable vram
+        if self.total_vram < 11:
+            batch_size = 1
+        elif self.total_vram < 24:
+            batch_size = 3
+        else:
+            batch_size = 6
+        print("batch_size:", batch_size)
+
         # load data
-        train_datasets, test_datasets = self.load_data(
+        train_datasets, test_datasets = self.load_data_llm(
             extracted_label=extracted_label,
             normalize=normalize,
             downsampling_n_instances=downsampling_n_instances,
@@ -199,23 +277,13 @@ class LLM(DataPreprocessing):
         else:
             optim = "adamw_torch"
 
-        # training arguments
-        logging_step = 1
-        num_train_epichs = 1
-        output_dir = f"./results_{self.name_data}"
-        group_by_length = True
-
-        fp16 = True
-        bf16 = False
-        lr_scheduler_type = "cosine"  # "constant"
-
         # print the params
         total_params = sum(p.numel() for p in model.parameters())
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
         # init wandb
         project = "projektarbeit_khoa_quy"
-        name = f"llama-lora-{self.name_data}"
+        name = self.create_name()
         hyperparameters_model = self.hyperparameters_configuration_dict(
             learning_rate=learning_rate,
             quantized=quantized,
@@ -224,11 +292,10 @@ class LLM(DataPreprocessing):
             lora_dropout=lora_dropout,
             batch_size=batch_size,
             gradient_accumulation_steps=gradient_accumulation_steps,
-            learning_rate=learning_rate,
             epochs=epochs,
         )
 
-        configurations = self.gpus.copy()
+        configurations = {f"gpu{i+1}": gpu for i, gpu in enumerate(self.gpus)}
         configurations["n_gpus"] = self.n_gpus
         configurations["n_params"] = total_params
         configurations["n_params_trainable"] = trainable_params
@@ -252,14 +319,30 @@ class LLM(DataPreprocessing):
             n_batch_test=np.ceil(n_instances_test / batch_size),
         )
 
-        wandb.init(project=project, name=name)
-        wandb.config.update(
-            {
-                "hyperparameters_model": hyperparameters_model,
-                "configurations": configurations,
-                "hyperparameters_data": hyperparameters_data,
-            }
+        wandb.init(
+            project=project,
+            name=name,
+            settings=wandb.Settings(
+                code_dir=os.path.dirname(self.path_models_directory)
+            ),
+            config={
+                "aa_hyperparameters_model": hyperparameters_model,
+                "aa_configurations": configurations,
+                "aa_hyperparameters_data": hyperparameters_data,
+            },
         )
+
+        # training arguments
+        logging_step = 1
+        logging_step = np.ceil(
+            len(train_datasets) / (batch_size * gradient_accumulation_steps)
+        )
+        output_dir = f"./results_{self.name_data}"
+        group_by_length = True
+
+        fp16 = True
+        bf16 = False
+        lr_scheduler_type = "constant"  # "cosine"
 
         training_arguments = TrainingArguments(
             # configuration parameters
@@ -274,14 +357,16 @@ class LLM(DataPreprocessing):
             bf16=bf16,
             seed=self.seed,
             run_name=f"llama-lora-{self.name_data}",
+            logging_strategy="epoch",
             # train parameters
             num_train_epochs=epochs,
             per_device_train_batch_size=batch_size,
             logging_steps=logging_step,
             # val parameters
             eval_steps=logging_step,
-            eval_strategy="steps",
+            eval_strategy="epoch",
             metric_for_best_model="eval_loss",
+            eval_accumulation_steps=gradient_accumulation_steps,
         )
 
         self.training_loop(
@@ -319,54 +404,16 @@ class LLM(DataPreprocessing):
             dataset_text_field="text",
             tokenizer=tokenizer,
             args=training_arguments,
+            compute_metrics=self.custom_accuracy,
+            callbacks=[TrainAccuracyCallback(self, train_dataset)],
         )
         trainer.train()  # resume_from_checkpoint=True
 
-        # print the params
-        total_params = sum(p.numel() for p in model.parameters())
-        print("total_params:", total_params)
-        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        print("trainable_params:", trainable_params)
+        model.eval()
+        self.evaluation(model=model, datasets=train_dataset, tokenizer=tokenizer)
+        self.evaluation(model=model, datasets=test_dataset, tokenizer=tokenizer)
 
-        # # print("epoch", ep)
-        # initial_params = {
-        #     name: param.clone().detach().cpu()
-        #     for name, param in model.named_parameters()
-        #     if param.requires_grad
-        # }
-        # print("initial_params:", initial_params)
-
-        # updated_params = {
-        #     name: param.clone().detach().cpu()
-        #     for name, param in model.named_parameters()
-        #     if param.requires_grad
-        # }
-
-        # # Compare parameter differences
-        # for name in initial_params:
-        #     if not torch.equal(initial_params[name], updated_params[name]):
-        #         print(f"✅ Model parameter '{name}' was updated during training.")
-        #     else:
-        #         print(f"⚠️ Model parameter '{name}' was NOT updated.")
-
-        # # evaluation
-        # model.eval()
-        # self.evaluation(model=model, datasets=train_dataset, tokenizer=tokenizer)
-        # self.evaluation(model=model, datasets=test_dataset, tokenizer=tokenizer)
-
-        # updated_params = {
-        #     name: param.clone().detach().cpu()
-        #     for name, param in model.named_parameters()
-        #     if param.requires_grad
-        # }
-
-        # # # Compare parameter differences
-        # print("check in eval")
-        # for name in initial_params:
-        #     if not torch.equal(initial_params[name], updated_params[name]):
-        #         print(f"✅ Model parameter '{name}' was updated during training.")
-        #     else:
-        #         print(f"⚠️ Model parameter '{name}' was NOT updated.")
+        trainer.evaluate()
 
     def evaluation(
         self,
@@ -383,7 +430,6 @@ class LLM(DataPreprocessing):
 
         # dataloader for faster training
         dataloader = DataLoader(dataset=datasets, batch_size=8, shuffle=False)
-        print("dataloader:", dataloader)
 
         # model in evaluation mode
         model.eval()
@@ -412,7 +458,7 @@ class LLM(DataPreprocessing):
                 # Decode responses
                 responses = tokenizer.batch_decode(
                     output_ids,
-                    # skip_special_tokens=True,
+                    skip_special_tokens=True,
                     # clean_up_tokenization_spaces=True,
                 )
                 print("responses:", responses)
@@ -458,6 +504,61 @@ class LLM(DataPreprocessing):
         return accuracy
 
 
+class TrainAccuracyCallback(TrainerCallback):
+    def __init__(self, llm_instance, train_dataset):
+        self.llm = llm_instance
+        self.train_dataset = train_dataset
+
+    def on_epoch_end(
+        self, args, state: TrainerState, control: TrainerControl, **kwargs
+    ):
+        print(
+            f"\n[TrainAccuracyCallback] Epoch {state.epoch} ended. Computing training accuracy..."
+        )
+
+        tokenizer = self.llm.load_tokenizer()
+        model = kwargs["model"]
+        device = self.llm.device
+
+        dataloader = DataLoader(self.train_dataset, batch_size=8, shuffle=False)
+
+        y_true_total = []
+        y_pred_total = []
+
+        model.eval()
+        with torch.no_grad():
+            for batch in dataloader:
+                questions = batch["question"]
+                answers = batch["answer"]
+
+                inputs = tokenizer(
+                    questions, return_tensors="pt", padding=True, truncation=True
+                ).to(device)
+
+                outputs = model.generate(
+                    **inputs, max_new_tokens=5, do_sample=False, top_p=1.0
+                )
+                decoded_preds = tokenizer.batch_decode(
+                    outputs, skip_special_tokens=True
+                )
+                y_pred = self.llm.extract_label_from_response(decoded_preds)
+                y_true = self.llm.extract_label_from_response(answers)
+
+                y_true_total += y_true
+                y_pred_total += y_pred
+
+        acc = self.llm.calculate_accuracy_y_text_list(y_true_total, y_pred_total)
+        print(
+            f"[TrainAccuracyCallback] Epoch {state.epoch}: Train Accuracy: {acc:.2f}%"
+        )
+
+        if wandb.run:
+            wandb.log(
+                {"train_custom_accuracy": acc, "epoch": state.epoch},
+                step=state.global_step,
+            )
+
+
 # run this script
 if __name__ == "__main__":
 
@@ -498,13 +599,13 @@ if __name__ == "__main__":
     downsampling_n_instances_train = None
     downsampling_n_instances_test = None
     name_feature = True
-    save = True
+    save = False
     quantized = True
     batch_size = 1
     gradient_accumulation_steps = 1
-    learning_rate = 0.0001
+    learning_rate = 0.001
     weight_decay = 0.001
-    epochs = 10
+    epochs = 15
 
     llm_hst.classification(
         lora_r=lora_r,
