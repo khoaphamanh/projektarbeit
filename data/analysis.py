@@ -11,6 +11,9 @@ class DataAnalysis:
             self.path_data_directory, self.name_data
         )
         self.check_data()
+        self.project_root_dir = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..")
+        )
 
     def check_data(self):
         """
@@ -46,7 +49,7 @@ class DataAnalysis:
         print_out=False,
     ):
         """
-        analysis of each csv file of the data
+        analysis of each csv file of the data also load raw data
         """
         # dict analysis
         dict_analysis = {}
@@ -129,10 +132,10 @@ class DataAnalysis:
 
 if __name__ == "__main__":
 
-    # data_name = "HST"
-    # hst = DataAnalysis(data_name)
-    # hst_data_dict = hst.analysis(print_out=True)
-    # print("hst_data_dict:", hst_data_dict)
+    data_name = "HST"
+    hst = DataAnalysis(data_name)
+    hst_data_dict = hst.analysis(print_out=True)
+    print("hst_data_dict:", hst_data_dict)
 
     data_name = "TEP"
     tep = DataAnalysis(data_name)
