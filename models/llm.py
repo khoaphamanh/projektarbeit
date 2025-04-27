@@ -167,58 +167,14 @@ class LLM(DataPreprocessing):
 
         return name
 
-    def hyperparameters_configuration_dict(self, **kwargs):
+    def hyperparameters_configuration_dict(self, print_out=False, **kwargs):
         """
         hyperparameter dictionary
         """
+        if print_out:
+            for k, v in kwargs.items():
+                print(f"{k}: {v}")
         return kwargs
-
-    def custom_accuracy(self, eval_preds):
-        """
-        Calculate custom accuracy for predictions during training.
-        """
-        tokenizer = self.load_tokenizer()
-
-        predictions, labels = eval_preds
-
-        # Convert to numpy if tensor
-        if isinstance(predictions, torch.Tensor):
-            predictions = predictions.argmax(dim=-1).cpu().numpy()
-        else:
-            predictions = np.array(predictions)
-
-        if isinstance(labels, torch.Tensor):
-            labels = labels.cpu().numpy()
-        else:
-            labels = np.array(labels)
-
-        # Sanity check: ensure 2D structure
-        if predictions.ndim == 3:
-            # shape: [batch, seq, vocab] → [batch, seq]
-            predictions = predictions.argmax(axis=-1)
-
-        if labels.ndim == 3:
-            labels = labels.argmax(axis=-1)
-
-        # Replace -100 with pad_token_id
-        labels = np.where(labels == -100, tokenizer.pad_token_id, labels)
-
-        # Convert to lists of token IDs
-        predictions = predictions.tolist()
-        labels = labels.tolist()
-
-        # Decode predictions and labels
-        decoded_preds = tokenizer.batch_decode(predictions, skip_special_tokens=True)
-        decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
-
-        # Extract labels
-        y_pred = self.extract_label_from_response(decoded_preds)
-        y_true = self.extract_label_from_response(decoded_labels)
-
-        # Accuracy
-        acc = self.calculate_accuracy_y_text_list(y_true=y_true, y_pred=y_pred)
-
-        return {"custom_accuracy": acc}
 
     def classification(
         self,
@@ -293,6 +249,7 @@ class LLM(DataPreprocessing):
             batch_size=batch_size,
             gradient_accumulation_steps=gradient_accumulation_steps,
             epochs=epochs,
+            print_out=True,
         )
 
         configurations = {f"gpu{i+1}": gpu for i, gpu in enumerate(self.gpus)}
@@ -301,6 +258,9 @@ class LLM(DataPreprocessing):
         configurations["n_params_trainable"] = trainable_params
         configurations["seed"] = self.seed
         configurations["name_model"] = self.name_model_llama_2
+        configurations = self.hyperparameters_configuration_dict(
+            **configurations, print_out=True
+        )
 
         n_instances_train = len(train_datasets)
         n_instances_test = len(test_datasets)
@@ -317,19 +277,21 @@ class LLM(DataPreprocessing):
             n_instances_test=n_instances_test,
             n_batch_train=np.ceil(n_instances_train / batch_size),
             n_batch_test=np.ceil(n_instances_test / batch_size),
+            print_out=True,
         )
 
         wandb.init(
             project=project,
             name=name,
             settings=wandb.Settings(
-                code_dir=os.path.dirname(self.path_models_directory)
+                code_dir="."  # self.project_root_dir  # os.path.dirname(self.path_models_directory)
             ),
             config={
                 "aa_hyperparameters_model": hyperparameters_model,
                 "aa_configurations": configurations,
                 "aa_hyperparameters_data": hyperparameters_data,
             },
+            save_code=True,
         )
 
         # training arguments
@@ -392,7 +354,6 @@ class LLM(DataPreprocessing):
         """
         training loop
         """
-        # for ep in range(epochs):
 
         # train the model
         model.train()
@@ -404,12 +365,14 @@ class LLM(DataPreprocessing):
             dataset_text_field="text",
             tokenizer=tokenizer,
             args=training_arguments,
-            compute_metrics=self.custom_accuracy,
-            callbacks=[TrainAccuracyCallback(self, train_dataset)],
+            compute_metrics=None,  # self.custom_accuracy,
+            callbacks=[
+                AccuracyCallback(self, train_dataset, mode="train"),
+                AccuracyCallback(self, test_dataset, mode="test"),
+            ],
         )
         trainer.train()  # resume_from_checkpoint=True
 
-        model.eval()
         self.evaluation(model=model, datasets=train_dataset, tokenizer=tokenizer)
         self.evaluation(model=model, datasets=test_dataset, tokenizer=tokenizer)
 
@@ -503,11 +466,49 @@ class LLM(DataPreprocessing):
         accuracy = (correct / len(y_true)) * 100
         return accuracy
 
+    def calculate_class_accuracy(self, y_true_total, y_pred_total):
+        """
+        calculate accuracies for each class
+        """
+        assert len(y_true_total) == len(y_pred_total), "Lengths must match."
 
-class TrainAccuracyCallback(TrainerCallback):
-    def __init__(self, llm_instance, train_dataset):
+        # Convert 'Y = 0' -> 0, 'Y = 1' -> 1', etc.
+        y_true = [int(label.split("=")[-1].strip()) for label in y_true_total]
+        y_pred = []
+        for pred in y_pred_total:
+            if pred == "none":
+                y_pred.append(None)
+            else:
+                y_pred.append(int(pred.split("=")[-1].strip()))
+
+        # Find all unique labels in y_true
+        unique_labels = sorted(set(y_true))
+
+        # Initialize counters for each label
+        correct_counts = {label: 0 for label in unique_labels}
+        total_counts = {label: 0 for label in unique_labels}
+
+        for yt, yp in zip(y_true, y_pred):
+            total_counts[yt] += 1
+            if yp is not None and yp == yt:
+                correct_counts[yt] += 1
+
+        # Calculate accuracy for each class
+        accuracies = {}
+        for label in unique_labels:
+            if total_counts[label] > 0:
+                accuracies[label] = correct_counts[label] / total_counts[label]
+            else:
+                accuracies[label] = None
+
+        return accuracies
+
+
+class AccuracyCallback(TrainerCallback):
+    def __init__(self, llm_instance, dataset, mode="train"):
         self.llm = llm_instance
-        self.train_dataset = train_dataset
+        self.dataset = dataset
+        self.mode = mode
 
     def on_epoch_end(
         self, args, state: TrainerState, control: TrainerControl, **kwargs
@@ -520,7 +521,7 @@ class TrainAccuracyCallback(TrainerCallback):
         model = kwargs["model"]
         device = self.llm.device
 
-        dataloader = DataLoader(self.train_dataset, batch_size=8, shuffle=False)
+        dataloader = DataLoader(self.dataset, batch_size=4, shuffle=False)
 
         y_true_total = []
         y_pred_total = []
@@ -547,14 +548,20 @@ class TrainAccuracyCallback(TrainerCallback):
                 y_true_total += y_true
                 y_pred_total += y_pred
 
+        # print out the accuracy
         acc = self.llm.calculate_accuracy_y_text_list(y_true_total, y_pred_total)
         print(
-            f"[TrainAccuracyCallback] Epoch {state.epoch}: Train Accuracy: {acc:.2f}%"
+            f"[AccuracyCallback] Epoch {state.epoch}: {self.mode} accuracy: {acc:.2f}%"
         )
+
+        # print out the accuracy for each class
+        acc_each_class = self.llm.calculate_class_accuracy(y_true_total, y_pred_total)
+        for label, acc in acc_each_class.items():
+            print(f"Accuracy for class {label}: {acc:.4f}")
 
         if wandb.run:
             wandb.log(
-                {"train_custom_accuracy": acc, "epoch": state.epoch},
+                {f"{self.mode}_custom_accuracy": acc, "epoch": state.epoch},
                 step=state.global_step,
             )
 
@@ -602,7 +609,7 @@ if __name__ == "__main__":
     save = False
     quantized = True
     batch_size = 1
-    gradient_accumulation_steps = 1
+    gradient_accumulation_steps = 8
     learning_rate = 0.001
     weight_decay = 0.001
     epochs = 15
