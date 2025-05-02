@@ -15,7 +15,7 @@ class DataPreprocessing(DataAnalysis):
         self.seed = seed
         self.train_size = 0.8
 
-    def load_data_llm_format(
+    def load_data(
         self,
         extracted_label=None,
         normalize=False,
@@ -23,6 +23,7 @@ class DataPreprocessing(DataAnalysis):
         downsampling_n_instances_train=None,
         downsampling_n_instances_test=None,
         name_feature=False,
+        convert_to_text=True,
         save=False,
     ):
         """
@@ -42,22 +43,24 @@ class DataPreprocessing(DataAnalysis):
             test_datasets = Dataset.load_from_disk(path_test_datasets)
 
         else:
-            train_datasets, test_datasets = self.create_text_dataset(
+            train_datasets, test_datasets = self.create_dataset(
                 extracted_label=extracted_label,
                 normalize=normalize,
                 downsampling_n_instances=downsampling_n_instances,
                 downsampling_n_instances_train=downsampling_n_instances_train,
                 downsampling_n_instances_test=downsampling_n_instances_test,
                 name_feature=name_feature,
+                convert_to_text=convert_to_text,
                 save=save,
             )
 
         return train_datasets, test_datasets
 
-    def create_text_dataset(
+    def create_dataset(
         self,
         extracted_label=None,
         normalize=False,
+        convert_to_text=True,
         downsampling_n_instances=None,
         downsampling_n_instances_train=None,
         downsampling_n_instances_test=None,
@@ -94,6 +97,7 @@ class DataPreprocessing(DataAnalysis):
                 y_df_test=y_df_test,
                 normalize=normalize,
                 name_feature=name_feature,
+                convert_to_text=convert_to_text,
             )
 
         # load data plited in TEP data
@@ -132,6 +136,7 @@ class DataPreprocessing(DataAnalysis):
                 downsampling_n_instances_test=downsampling_n_instances_test,
                 normalize=normalize,
                 name_feature=name_feature,
+                convert_to_text=convert_to_text,
             )
 
         # save the data llm format
@@ -179,6 +184,7 @@ class DataPreprocessing(DataAnalysis):
         downsampling_n_instances_test=None,
         normalize=False,
         name_feature=False,
+        convert_to_text=True,
     ):
         """
         preprocessing after train test split
@@ -218,19 +224,25 @@ class DataPreprocessing(DataAnalysis):
             self.convert_to_array(X_df_train, X_df_test, y_df_train, y_df_test)
         )
 
-        # convert to text and create prompt
-        train_datasets = self.convert_df_to_text(
-            X_array=X_array_train,
-            y_array=y_array_train,
-            name_feature=name_feature,
-            system_behavior=system_behavior,
-        )
-        test_datasets = self.convert_df_to_text(
-            X_array=X_array_test,
-            y_array=y_array_test,
-            name_feature=name_feature,
-            system_behavior=system_behavior,
-        )
+        # convert to text
+        if convert_to_text:
+            # convert to text and create prompt
+            train_datasets = self.convert_df_to_text(
+                X_array=X_array_train,
+                y_array=y_array_train,
+                name_feature=name_feature,
+                system_behavior=system_behavior,
+            )
+            test_datasets = self.convert_df_to_text(
+                X_array=X_array_test,
+                y_array=y_array_test,
+                name_feature=name_feature,
+                system_behavior=system_behavior,
+            )
+        # keep in array
+        else:
+            train_datasets = {"X_train": X_array_train, "y_train": y_array_train}
+            test_datasets = {"X_test": X_array_test, "y_test": y_array_test}
 
         return train_datasets, test_datasets
 
@@ -342,7 +354,7 @@ class DataPreprocessing(DataAnalysis):
                 )
             )
             # create text answer instance for one instance from X
-            answer_one_instance = "Y = {}".format(y_instance)
+            answer_one_instance = y_instance
 
             # append to data text list of all instance
             data_text_list_all_instances.append(
@@ -428,36 +440,62 @@ if __name__ == "__main__":
     # load data
     data_name = "HST"
     hst = DataPreprocessing(data_name, seed=seed)
-    hst_train, hst_test = hst.load_data_llm_format(
-        downsampling_n_instances=300, normalize=True, name_feature=True, save=True
+    hst_train, hst_test = hst.load_data(
+        downsampling_n_instances=300,
+        normalize=True,
+        name_feature=True,
+        convert_to_text=True,
+        save=False,
     )
 
-    # print("hst_train len:", len(hst_train))
-    # print("hst_test len:", len(hst_test))
+    print("hst_train len:", len(hst_train))
+    print("hst_test len:", len(hst_test))
 
-    # for i in hst_test:
-    #     print(i)
+    print("hst_train")
+    print(hst_train)
 
+    print("hst_test")
+    print(hst_test)
+
+    for i in hst_train:
+        print(i)
+    print()
+    for i in hst_test:
+        print(i)
+
+    # for i, j in hst_train.items():
+    #     print(i, j)
+    #     for i in j:
+    #         print(i)
     data_name = "TEP"
     extracted_label = [0, 1, 4, 5]
     tep = DataPreprocessing(data_name, seed=seed)
-    tep_train, tep_test = tep.load_data_llm_format(
+    tep_train, tep_test = tep.load_data(
         extracted_label=extracted_label,
         normalize=True,
         downsampling_n_instances_train=400,
         downsampling_n_instances_test=160,
         name_feature=True,
-        save=True,
+        convert_to_text=True,
+        save=False,
     )
 
-    # for i in tep_test:
-    #     print(i)
-    #     break
+    for i in tep_train:
+        print(i)
+    print()
+    for i in tep_test:
+        print(i)
 
     print(len(tep_train))
     print(len(tep_test))
 
-    from torch.utils.data import DataLoader
+    print("tep_train")
+    print(tep_train)
+
+    print("tep_test")
+    print(tep_test)
+
+    # from torch.utils.data import DataLoader
 
     # dataloader = DataLoader(tep_test, batch_size=2, shuffle=False)
     # for X in dataloader:
