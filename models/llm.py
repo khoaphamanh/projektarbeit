@@ -29,9 +29,9 @@ from torch.utils.data import DataLoader
 from timeit import default_timer
 import random
 import numpy as np
-import re
 import wandb
 from datetime import datetime
+from sklearn.metrics import accuracy_score
 
 # import preprocessing file
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -402,7 +402,8 @@ class LLM(DataPreprocessing):
             for idx, batch in tqdm(
                 enumerate(dataloader), desc="Processing", unit="batch"
             ):
-                question_prompts = batch["question"]  # Get batch of questions
+                # get question and answer
+                question_prompts = batch["question"]
                 answers = batch["answer"]
 
                 # Tokenize entire batch at once (instead of looping one-by-one)
@@ -412,24 +413,20 @@ class LLM(DataPreprocessing):
 
                 # Generate responses for entire batch at once
                 output_ids = model.generate(
-                    **inputs,
-                    max_new_tokens=5,
-                    do_sample=False,
-                    top_p=1.0,
-                )
+                    **inputs, max_new_tokens=1, do_sample=False
+                )  # remove top_p = 1.0 because already use do_sample
 
                 # Decode responses
                 responses = tokenizer.batch_decode(
                     output_ids,
                     skip_special_tokens=True,
-                    # clean_up_tokenization_spaces=True,
                 )
                 print("responses:", responses)
 
-                y_true = self.extract_label_from_response(list_strings=answers)
+                y_true = self.extract_label_from_response(response=answers)
                 y_true_total = y_true_total + y_true
 
-                y_pred = self.extract_label_from_response(list_strings=responses)
+                y_pred = self.extract_label_from_response(response=responses)
                 y_pred_total = y_pred_total + y_pred
 
                 # Print results
@@ -441,22 +438,19 @@ class LLM(DataPreprocessing):
 
         print("y_true_total:", y_true_total)
         print("y_pred_total:", y_pred_total)
-        accuracy = self.calculate_accuracy_y_text_list(
-            y_true=y_true_total, y_pred=y_pred_total
-        )
+        accuracy = accuracy_score(y_true=y_true_total, y_pred=y_pred_total)
         print("accuracy:", accuracy)
         end = default_timer()
         duration = end - start
         print("duration:", duration)
 
-    def extract_label_from_response(self, list_strings):
+    def extract_label_from_response(self, response):
         """
-        use re to extract the label from the list of response or answer
+        len of each element in response has len only 1, if a digit, return integer else 99
         """
-        # Regular expression to match "Y =" followed by any number (integer or float)
-        list_match = [re.search(r"Y\s*=\s*(-?\d+(\.\d+)?)", i) for i in list_strings]
-        list_y = [i.group() if i else "none" for i in list_match]
-        return list_y
+        y = [int(s) if s.isdigit() else 99 for s in response]
+
+        return y
 
     def calculate_accuracy_y_text_list(self, y_true, y_pred):
         """
@@ -466,42 +460,25 @@ class LLM(DataPreprocessing):
         accuracy = (correct / len(y_true)) * 100
         return accuracy
 
-    def calculate_class_accuracy(self, y_true_total, y_pred_total):
+    def class_wise_accuracy(y_true, y_pred):
         """
-        calculate accuracies for each class
+        calculate accuracy each class
         """
-        assert len(y_true_total) == len(y_pred_total), "Lengths must match."
+        y_true = np.array(y_true)
+        y_pred = np.array(y_pred)
 
-        # Convert 'Y = 0' -> 0, 'Y = 1' -> 1', etc.
-        y_true = [int(label.split("=")[-1].strip()) for label in y_true_total]
-        y_pred = []
-        for pred in y_pred_total:
-            if pred == "none":
-                y_pred.append(None)
-            else:
-                y_pred.append(int(pred.split("=")[-1].strip()))
+        unique_labels = np.unique(y_true)
+        class_accuracy = {}
 
-        # Find all unique labels in y_true
-        unique_labels = sorted(set(y_true))
-
-        # Initialize counters for each label
-        correct_counts = {label: 0 for label in unique_labels}
-        total_counts = {label: 0 for label in unique_labels}
-
-        for yt, yp in zip(y_true, y_pred):
-            total_counts[yt] += 1
-            if yp is not None and yp == yt:
-                correct_counts[yt] += 1
-
-        # Calculate accuracy for each class
-        accuracies = {}
         for label in unique_labels:
-            if total_counts[label] > 0:
-                accuracies[label] = correct_counts[label] / total_counts[label]
-            else:
-                accuracies[label] = None
+            # Mask for samples belonging to this class
+            mask = y_true == label
+            correct = np.sum(y_pred[mask] == y_true[mask])
+            total = np.sum(mask)
+            accuracy = correct / total if total > 0 else 0.0
+            class_accuracy[label] = accuracy
 
-        return accuracies
+        return class_accuracy
 
 
 class AccuracyCallback(TrainerCallback):
@@ -521,7 +498,7 @@ class AccuracyCallback(TrainerCallback):
         model = kwargs["model"]
         device = self.llm.device
 
-        dataloader = DataLoader(self.dataset, batch_size=4, shuffle=False)
+        dataloader = DataLoader(self.dataset, batch_size=2, shuffle=False)
 
         y_true_total = []
         y_pred_total = []
@@ -537,8 +514,8 @@ class AccuracyCallback(TrainerCallback):
                 ).to(device)
 
                 outputs = model.generate(
-                    **inputs, max_new_tokens=5, do_sample=False, top_p=1.0
-                )
+                    **inputs, max_new_tokens=1, do_sample=False
+                )  # remove top_p = 1.0 because already use do_sample
                 decoded_preds = tokenizer.batch_decode(
                     outputs, skip_special_tokens=True
                 )
@@ -549,21 +526,21 @@ class AccuracyCallback(TrainerCallback):
                 y_pred_total += y_pred
 
         # print out the accuracy
-        acc = self.llm.calculate_accuracy_y_text_list(y_true_total, y_pred_total)
+        acc = accuracy_score(y_true_total, y_pred_total)
         print(
             f"[AccuracyCallback] Epoch {state.epoch}: {self.mode} accuracy: {acc:.2f}%"
         )
-
-        # print out the accuracy for each class
-        acc_each_class = self.llm.calculate_class_accuracy(y_true_total, y_pred_total)
-        for label, acc in acc_each_class.items():
-            print(f"Accuracy for class {label}: {acc:.4f}")
 
         if wandb.run:
             wandb.log(
                 {f"{self.mode}_custom_accuracy": acc, "epoch": state.epoch},
                 step=state.global_step,
             )
+
+        # print out the accuracy for each class
+        acc_each_class = self.llm.class_wise_accuracy(y_true_total, y_pred_total)
+        for label, acc_class in acc_each_class.items():
+            print(f"Accuracy for class {label}: {acc_class:.4f}")
 
 
 # run this script
@@ -609,10 +586,10 @@ if __name__ == "__main__":
     save = False
     quantized = True
     batch_size = 1
-    gradient_accumulation_steps = 8
+    gradient_accumulation_steps = 1
     learning_rate = 0.001
     weight_decay = 0.001
-    epochs = 15
+    epochs = 150
 
     llm_hst.classification(
         lora_r=lora_r,
