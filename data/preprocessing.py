@@ -354,7 +354,7 @@ class DataPreprocessing(DataAnalysis):
                 )
             )
             # create text answer instance for one instance from X
-            answer_one_instance = y_instance
+            answer_one_instance = y_instance  # old f"Y = {y_instance}"
 
             # append to data text list of all instance
             data_text_list_all_instances.append(
