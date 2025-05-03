@@ -32,6 +32,7 @@ import numpy as np
 import wandb
 from datetime import datetime
 from sklearn.metrics import accuracy_score
+import re
 
 # import preprocessing file
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -193,6 +194,7 @@ class LLM(DataPreprocessing):
         gradient_accumulation_steps=1,
         learning_rate=0.0001,
         weight_decay=0.001,
+        max_new_tokens=5,
         epochs=10,
     ):
         """
@@ -338,6 +340,7 @@ class LLM(DataPreprocessing):
             test_dataset=test_datasets,
             peft_config=peft_config,
             tokenizer=tokenizer,
+            max_new_tokens=max_new_tokens,
             training_arguments=training_arguments,
         )
 
@@ -349,6 +352,7 @@ class LLM(DataPreprocessing):
         test_dataset,
         peft_config,
         tokenizer,
+        max_new_tokens,
         training_arguments: TrainingArguments,
     ):
         """
@@ -367,23 +371,30 @@ class LLM(DataPreprocessing):
             args=training_arguments,
             compute_metrics=None,  # self.custom_accuracy,
             callbacks=[
-                AccuracyCallback(self, train_dataset, mode="train"),
-                AccuracyCallback(self, test_dataset, mode="test"),
+                AccuracyCallback(self, max_new_tokens, train_dataset, mode="train"),
+                AccuracyCallback(self, max_new_tokens, test_dataset, mode="test"),
             ],
         )
         trainer.train()  # resume_from_checkpoint=True
 
-        self.evaluation(model=model, datasets=train_dataset, tokenizer=tokenizer)
-        self.evaluation(model=model, datasets=test_dataset, tokenizer=tokenizer)
+        self.evaluation(
+            model=model,
+            datasets=train_dataset,
+            tokenizer=tokenizer,
+            batch_size=training_arguments.per_device_train_batch_size * 8,
+            max_new_token=max_new_tokens,
+        )
+        self.evaluation(
+            model=model,
+            datasets=test_dataset,
+            tokenizer=tokenizer,
+            max_new_token=max_new_tokens,
+            batch_size=training_arguments.per_device_train_batch_size * 8,
+        )
 
         trainer.evaluate()
 
-    def evaluation(
-        self,
-        model,
-        datasets,
-        tokenizer,
-    ):
+    def evaluation(self, model, datasets, tokenizer, batch_size, max_new_token):
         """
         evaluation mode, only for check accuracy
         """
@@ -392,7 +403,7 @@ class LLM(DataPreprocessing):
         y_pred_total = []
 
         # dataloader for faster training
-        dataloader = DataLoader(dataset=datasets, batch_size=8, shuffle=False)
+        dataloader = DataLoader(dataset=datasets, batch_size=batch_size, shuffle=False)
 
         # model in evaluation mode
         model.eval()
@@ -413,7 +424,7 @@ class LLM(DataPreprocessing):
 
                 # Generate responses for entire batch at once
                 output_ids = model.generate(
-                    **inputs, max_new_tokens=1, do_sample=False
+                    **inputs, max_new_tokens=max_new_token, do_sample=False, top_p=1.0
                 )  # remove top_p = 1.0 because already use do_sample
 
                 # Decode responses
@@ -423,10 +434,10 @@ class LLM(DataPreprocessing):
                 )
                 print("responses:", responses)
 
-                y_true = self.extract_label_from_response(response=answers)
+                y_true = self.extract_label_from_response(answers)
                 y_true_total = y_true_total + y_true
 
-                y_pred = self.extract_label_from_response(response=responses)
+                y_pred = self.extract_label_from_response(responses)
                 y_pred_total = y_pred_total + y_pred
 
                 # Print results
@@ -444,23 +455,47 @@ class LLM(DataPreprocessing):
         duration = end - start
         print("duration:", duration)
 
-    def extract_label_from_response(self, response):
+    def extract_label_from_response(self, y):
         """
-        len of each element in response has len only 1, if a digit, return integer else 99
+        len of each response has len only 1, if a digit, return integer else 99
         """
-        y = [int(s) if s.isdigit() else 99 for s in response]
 
-        return y
+        def extract_integer_after_inst(text):
+            # Step 1: Extract the part after [/INST]
+            match = re.search(r"\[/INST\](.*?)(</s>|$)", text)
+            print("match:", match)
 
-    def calculate_accuracy_y_text_list(self, y_true, y_pred):
-        """
-        calculate accuracy
-        """
-        correct = sum(1 for true, pred in zip(y_true, y_pred) if true == pred)
-        accuracy = (correct / len(y_true)) * 100
-        return accuracy
+            if match:
+                response_text = match.group(1).strip()
+                print("response_text re:", response_text)
 
-    def class_wise_accuracy(y_true, y_pred):
+                # Step 2: Extract the first integer in the response
+                int_match = re.search(r"\b\d+\b", response_text)
+                print("int_match:", int_match)
+
+                if int_match:
+                    return int(int_match.group())
+
+            return 99  # or another default like 99
+
+        # check the first element
+        check_element = y[0]
+        print("check_element:", check_element)
+        print(type(check_element))
+
+        # if y_test
+        if isinstance(check_element, str):
+            print("this case y_pred")
+            result = [extract_integer_after_inst(text) for text in y]
+
+        # y_true only contains label as integer
+        else:
+            print("this case y_true")
+            result = [int(s) for s in y]
+
+        return result
+
+    def class_wise_accuracy(self, y_true, y_pred):
         """
         calculate accuracy each class
         """
@@ -482,13 +517,18 @@ class LLM(DataPreprocessing):
 
 
 class AccuracyCallback(TrainerCallback):
-    def __init__(self, llm_instance, dataset, mode="train"):
+    def __init__(self, llm_instance, max_new_tokens, dataset, mode="train"):
         self.llm = llm_instance
+        self.max_new_tokens = max_new_tokens
         self.dataset = dataset
         self.mode = mode
 
     def on_epoch_end(
-        self, args, state: TrainerState, control: TrainerControl, **kwargs
+        self,
+        args,
+        state: TrainerState,
+        control: TrainerControl,
+        **kwargs,
     ):
         print(
             f"\n[TrainAccuracyCallback] Epoch {state.epoch} ended. Computing training accuracy..."
@@ -497,8 +537,9 @@ class AccuracyCallback(TrainerCallback):
         tokenizer = self.llm.load_tokenizer()
         model = kwargs["model"]
         device = self.llm.device
+        batch_size = args.per_device_train_batch_size * 8
 
-        dataloader = DataLoader(self.dataset, batch_size=2, shuffle=False)
+        dataloader = DataLoader(self.dataset, batch_size=batch_size, shuffle=False)
 
         y_true_total = []
         y_pred_total = []
@@ -506,24 +547,38 @@ class AccuracyCallback(TrainerCallback):
         model.eval()
         with torch.no_grad():
             for batch in dataloader:
-                questions = batch["question"]
+                question_prompts = batch["question"]
+                # print("questions:", questions)
                 answers = batch["answer"]
+                # print("answers:", answers)
 
                 inputs = tokenizer(
-                    questions, return_tensors="pt", padding=True, truncation=True
+                    question_prompts, return_tensors="pt", padding=True, truncation=True
                 ).to(device)
+                # print("inputs shape:", inputs.shape)
 
                 outputs = model.generate(
-                    **inputs, max_new_tokens=1, do_sample=False
+                    **inputs,
+                    max_new_tokens=self.max_new_tokens,
+                    do_sample=False,
+                    top_p=1.0,
                 )  # remove top_p = 1.0 because already use do_sample
-                decoded_preds = tokenizer.batch_decode(
-                    outputs, skip_special_tokens=True
-                )
-                y_pred = self.llm.extract_label_from_response(decoded_preds)
+                # print("outputs shape:", outputs.shape)
+
+                responses = tokenizer.batch_decode(outputs, skip_special_tokens=True)
+
+                y_pred = self.llm.extract_label_from_response(responses)
                 y_true = self.llm.extract_label_from_response(answers)
 
                 y_true_total += y_true
                 y_pred_total += y_pred
+
+                # Print results
+                for idx, response in enumerate(responses):
+                    print(f"Sample {idx}:")
+                    print("Question:", question_prompts[idx])
+                    print("Response:", response)
+                    print("Answer:", batch["answer"][idx])
 
         # print out the accuracy
         acc = accuracy_score(y_true_total, y_pred_total)
@@ -579,7 +634,7 @@ if __name__ == "__main__":
     lora_dropout = 0.1
     extracted_label = None
     normalize = True
-    downsampling_n_instances = 300
+    downsampling_n_instances = 50
     downsampling_n_instances_train = None
     downsampling_n_instances_test = None
     name_feature = True
@@ -589,7 +644,8 @@ if __name__ == "__main__":
     gradient_accumulation_steps = 1
     learning_rate = 0.001
     weight_decay = 0.001
-    epochs = 150
+    max_new_tokens = 5
+    epochs = 15
 
     llm_hst.classification(
         lora_r=lora_r,
@@ -607,5 +663,6 @@ if __name__ == "__main__":
         gradient_accumulation_steps=gradient_accumulation_steps,
         learning_rate=learning_rate,
         weight_decay=weight_decay,
+        max_new_tokens=max_new_tokens,
         epochs=epochs,
     )
