@@ -201,12 +201,22 @@ class LLM(DataPreprocessing):
         train llm model on dataset with llama-2 format
         """
         # control batchsize for suitable vram
-        if self.total_vram < 11:
-            batch_size = 1
-        elif self.total_vram < 24:
-            batch_size = 3
-        else:
-            batch_size = 6
+        if self.name_data == "TEP":
+            if self.total_vram < 11:
+                batch_size = 1
+            elif self.total_vram < 24:
+                batch_size = 2
+            else:
+                batch_size = 5
+
+        elif self.name_data == "HST":
+            if self.total_vram < 11:
+                batch_size = 1
+            elif self.total_vram < 24:
+                batch_size = 3
+            else:
+                batch_size = 6
+
         print("batch_size:", batch_size)
 
         # load data
@@ -381,7 +391,7 @@ class LLM(DataPreprocessing):
             model=model,
             datasets=train_dataset,
             tokenizer=tokenizer,
-            batch_size=training_arguments.per_device_train_batch_size * 8,
+            batch_size=training_arguments.per_device_train_batch_size * 6,
             max_new_token=max_new_tokens,
         )
         self.evaluation(
@@ -389,7 +399,7 @@ class LLM(DataPreprocessing):
             datasets=test_dataset,
             tokenizer=tokenizer,
             max_new_token=max_new_tokens,
-            batch_size=training_arguments.per_device_train_batch_size * 8,
+            batch_size=training_arguments.per_device_train_batch_size * 6,
         )
 
         trainer.evaluate()
@@ -449,65 +459,67 @@ class LLM(DataPreprocessing):
 
         print("y_true_total:", y_true_total)
         print("y_pred_total:", y_pred_total)
-        accuracy = accuracy_score(y_true=y_true_total, y_pred=y_pred_total)
+        accuracy = self.calculate_accuracy_y_text_list(
+            y_pred=y_pred_total, y_true=y_true_total
+        )  # accuracy_score(y_true=y_true_total, y_pred=y_pred_total)
         print("accuracy:", accuracy)
         end = default_timer()
         duration = end - start
         print("duration:", duration)
 
-    def extract_label_from_response(self, y):
+    def extract_label_from_response(self, list_strings):
         """
-        len of each response has len only 1, if a digit, return integer else 99
+        use re to extract the label from the list of response or answer
         """
+        # Regular expression to match "Y =" followed by any number (integer or float)
+        list_match = [re.search(r"Y\s*=\s*(-?\d+(\.\d+)?)", i) for i in list_strings]
+        list_y = [i.group() if i else "none" for i in list_match]
+        return list_y
 
-        def extract_integer_after_inst(text):
-            # Step 1: Extract the part after [/INST]
-            match = re.search(r"\[/INST\](.*?)(</s>|$)", text)
-
-            if match:
-                response_text = match.group(1).strip()
-
-                # Step 2: Extract the first integer in the response
-                int_match = re.search(r"\b\d+\b", response_text)
-
-                if int_match:
-                    return int(int_match.group())
-
-            return 99  # or another default like 99
-
-        # check the first element
-        check_element = y[0]
-
-        # if y_test
-        if isinstance(check_element, str):
-            result = [extract_integer_after_inst(text) for text in y]
-
-        # y_true only contains label as integer
-        else:
-            print("this case y_true")
-            result = [int(s) for s in y]
-
-        return result
-
-    def class_wise_accuracy(self, y_true, y_pred):
+    def calculate_accuracy_y_text_list(self, y_true, y_pred):
         """
-        calculate accuracy each class
+        calculate accuracy
         """
-        y_true = np.array(y_true)
-        y_pred = np.array(y_pred)
+        correct = sum(1 for true, pred in zip(y_true, y_pred) if true == pred)
+        accuracy = correct / len(y_true)
+        return accuracy
 
-        unique_labels = np.unique(y_true)
-        class_accuracy = {}
+    def class_wise_accuracy(self, y_true_total, y_pred_total):
+        """
+        calculate accuracies for each class
+        """
+        assert len(y_true_total) == len(y_pred_total), "Lengths must match."
 
+        # Convert 'Y = 0' -> 0, 'Y = 1' -> 1', etc.
+        y_true = [int(label.split("=")[-1].strip()) for label in y_true_total]
+        y_pred = []
+        for pred in y_pred_total:
+            if pred == "none":
+                y_pred.append(None)
+            else:
+                y_pred.append(int(pred.split("=")[-1].strip()))
+
+        # Find all unique labels in y_true
+        unique_labels = sorted(set(y_true))
+
+        # Initialize counters for each label
+        correct_counts = {label: 0 for label in unique_labels}
+        total_counts = {label: 0 for label in unique_labels}
+
+        for yt, yp in zip(y_true, y_pred):
+            total_counts[yt] += 1
+            if yp is not None and yp == yt:
+                correct_counts[yt] += 1
+
+        # Calculate accuracy for each class
+        accuracies = {}
         for label in unique_labels:
-            # Mask for samples belonging to this class
-            mask = y_true == label
-            correct = np.sum(y_pred[mask] == y_true[mask])
-            total = np.sum(mask)
-            accuracy = correct / total if total > 0 else 0.0
-            class_accuracy[label] = accuracy
+            if total_counts[label] > 0:
+                accuracies[label] = correct_counts[label] / total_counts[label]
+            else:
+                accuracies[label] = None
 
-        return class_accuracy
+        return accuracies
 
 
 class AccuracyCallback(TrainerCallback):
@@ -531,7 +543,7 @@ class AccuracyCallback(TrainerCallback):
         tokenizer = self.llm.load_tokenizer()
         model = kwargs["model"]
         device = self.llm.device
-        batch_size = args.per_device_train_batch_size * 8
+        batch_size = args.per_device_train_batch_size * 6
 
         dataloader = DataLoader(self.dataset, batch_size=batch_size, shuffle=False)
 
@@ -576,7 +588,9 @@ class AccuracyCallback(TrainerCallback):
         print("y_pred_total:", y_pred_total)
 
         # print out the accuracy
-        acc = accuracy_score(y_true_total, y_pred_total)
+        acc = self.llm.calculate_accuracy_y_text_list(
+            y_pred=y_pred_total, y_true=y_true_total
+        )  # accuracy_score(y_true_total, y_pred_total)
         print(
             f"[AccuracyCallback] Epoch {state.epoch}: {self.mode} accuracy: {acc:.2f}%"
         )
@@ -603,7 +617,6 @@ class AccuracyCallback(TrainerCallback):
 # run this script
 if __name__ == "__main__":
 
-    name_data = "HST"
     seed = 1998
 
     def set_random_seed(seed=42):
@@ -628,17 +641,19 @@ if __name__ == "__main__":
     set_random_seed(seed=seed)
 
     # init llm hst
-    llm_hst = LLM(name_data=name_data, seed=seed)
+    name_data = "TEP"  # "HST"
+    print("name_data:", name_data)
+    llm_run = LLM(name_data=name_data, seed=seed)
 
     # hyperparameters
     lora_r = 8
     lora_alpha = 32
     lora_dropout = 0.1
-    extracted_label = None
+    extracted_label = [0, 1, 4, 5]
     normalize = True
-    downsampling_n_instances = 300
-    downsampling_n_instances_train = None
-    downsampling_n_instances_test = None
+    downsampling_n_instances = None
+    downsampling_n_instances_train = 400
+    downsampling_n_instances_test = 160
     name_feature = True
     save = False
     quantized = True
@@ -649,7 +664,31 @@ if __name__ == "__main__":
     max_new_tokens = 5
     epochs = 150
 
-    llm_hst.classification(
+    # # init llm hst
+    # name_data = "HST"
+    # print("name_data:", name_data)
+    # llm_run = LLM(name_data=name_data, seed=seed)
+
+    # # hyperparameters
+    # lora_r = 8
+    # lora_alpha = 32
+    # lora_dropout = 0.1
+    # extracted_label = None
+    # normalize = True
+    # downsampling_n_instances = 300
+    # downsampling_n_instances_train = None
+    # downsampling_n_instances_test = None
+    # name_feature = True
+    # save = False
+    # quantized = True
+    # batch_size = 1
+    # gradient_accumulation_steps = 1
+    # learning_rate = 0.001
+    # weight_decay = 0.001
+    # max_new_tokens = 5
+    # epochs = 150
+
+    llm_run.classification(
         lora_r=lora_r,
         lora_alpha=lora_alpha,
         lora_dropout=lora_dropout,
