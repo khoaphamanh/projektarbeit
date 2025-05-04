@@ -463,15 +463,12 @@ class LLM(DataPreprocessing):
         def extract_integer_after_inst(text):
             # Step 1: Extract the part after [/INST]
             match = re.search(r"\[/INST\](.*?)(</s>|$)", text)
-            print("match:", match)
 
             if match:
                 response_text = match.group(1).strip()
-                print("response_text re:", response_text)
 
                 # Step 2: Extract the first integer in the response
                 int_match = re.search(r"\b\d+\b", response_text)
-                print("int_match:", int_match)
 
                 if int_match:
                     return int(int_match.group())
@@ -480,12 +477,9 @@ class LLM(DataPreprocessing):
 
         # check the first element
         check_element = y[0]
-        print("check_element:", check_element)
-        print(type(check_element))
 
         # if y_test
         if isinstance(check_element, str):
-            print("this case y_pred")
             result = [extract_integer_after_inst(text) for text in y]
 
         # y_true only contains label as integer
@@ -548,9 +542,7 @@ class AccuracyCallback(TrainerCallback):
         with torch.no_grad():
             for batch in dataloader:
                 question_prompts = batch["question"]
-                # print("questions:", questions)
                 answers = batch["answer"]
-                # print("answers:", answers)
 
                 inputs = tokenizer(
                     question_prompts, return_tensors="pt", padding=True, truncation=True
@@ -580,6 +572,9 @@ class AccuracyCallback(TrainerCallback):
                     print("Response:", response)
                     print("Answer:", batch["answer"][idx])
 
+        print("y_true_total:", y_true_total)
+        print("y_pred_total:", y_pred_total)
+
         # print out the accuracy
         acc = accuracy_score(y_true_total, y_pred_total)
         print(
@@ -596,6 +591,13 @@ class AccuracyCallback(TrainerCallback):
         acc_each_class = self.llm.class_wise_accuracy(y_true_total, y_pred_total)
         for label, acc_class in acc_each_class.items():
             print(f"Accuracy for class {label}: {acc_class:.4f}")
+
+            # log the accuracy each class
+            if wandb.run:
+                wandb.log(
+                    {f"class_{label}_custom_accuracy": acc_class, "epoch": state.epoch},
+                    step=state.global_step,
+                )
 
 
 # run this script
@@ -634,7 +636,7 @@ if __name__ == "__main__":
     lora_dropout = 0.1
     extracted_label = None
     normalize = True
-    downsampling_n_instances = 50
+    downsampling_n_instances = 300
     downsampling_n_instances_train = None
     downsampling_n_instances_test = None
     name_feature = True
@@ -645,7 +647,7 @@ if __name__ == "__main__":
     learning_rate = 0.001
     weight_decay = 0.001
     max_new_tokens = 5
-    epochs = 15
+    epochs = 150
 
     llm_hst.classification(
         lora_r=lora_r,
