@@ -179,6 +179,7 @@ class LLM(DataPreprocessing):
 
     def classification(
         self,
+        project="projektarbeit_khoa_quy",
         lora_r=8,
         lora_alpha=32,
         lora_dropout=0.1,
@@ -195,6 +196,7 @@ class LLM(DataPreprocessing):
         learning_rate=0.0001,
         weight_decay=0.001,
         max_new_tokens=5,
+        save_model=False,
         epochs=10,
     ):
         """
@@ -205,9 +207,9 @@ class LLM(DataPreprocessing):
             if self.total_vram < 11:
                 batch_size = 1
             elif self.total_vram < 24:
-                batch_size = 2
+                batch_size = 3
             else:
-                batch_size = 5
+                batch_size = 4
 
         elif self.name_data == "HST":
             if self.total_vram < 11:
@@ -250,7 +252,6 @@ class LLM(DataPreprocessing):
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
         # init wandb
-        project = "projektarbeit_khoa_quy"
         name = self.create_name()
         hyperparameters_model = self.hyperparameters_configuration_dict(
             learning_rate=learning_rate,
@@ -311,6 +312,8 @@ class LLM(DataPreprocessing):
         logging_step = np.ceil(
             len(train_datasets) / (batch_size * gradient_accumulation_steps)
         )
+
+        save_strategy = "no" if not save_model else "epoch"
         output_dir = f"./results_{self.name_data}"
         group_by_length = True
 
@@ -332,6 +335,7 @@ class LLM(DataPreprocessing):
             seed=self.seed,
             run_name=f"llama-lora-{self.name_data}",
             logging_strategy="epoch",
+            save_strategy=save_strategy,
             # train parameters
             num_train_epochs=epochs,
             per_device_train_batch_size=batch_size,
@@ -459,9 +463,9 @@ class LLM(DataPreprocessing):
 
         print("y_true_total:", y_true_total)
         print("y_pred_total:", y_pred_total)
-        accuracy = self.calculate_accuracy_y_text_list(
-            y_pred=y_pred_total, y_true=y_true_total
-        )  # accuracy_score(y_true=y_true_total, y_pred=y_pred_total)
+
+        # calculate accuracy score
+        accuracy = accuracy_score(y_pred=y_pred_total, y_true=y_true_total)
         print("accuracy:", accuracy)
         end = default_timer()
         duration = end - start
@@ -473,53 +477,29 @@ class LLM(DataPreprocessing):
         """
         # Regular expression to match "Y =" followed by any number (integer or float)
         list_match = [re.search(r"Y\s*=\s*(-?\d+(\.\d+)?)", i) for i in list_strings]
-        list_y = [i.group() if i else "none" for i in list_match]
+        list_y = [i.group() if i else 99 for i in list_match]
+
         return list_y
 
-    def calculate_accuracy_y_text_list(self, y_true, y_pred):
+    def class_wise_accuracy(self, y_true, y_pred):
         """
-        calculate accuracy
+        calculate accuracy each class
         """
-        correct = sum(1 for true, pred in zip(y_true, y_pred) if true == pred)
-        accuracy = correct / len(y_true)
-        return accuracy
+        y_true = np.array(y_true)
+        y_pred = np.array(y_pred)
 
-    def class_wise_accuracy(self, y_true_total, y_pred_total):
-        """
-        calculate accuracies for each class
-        """
-        assert len(y_true_total) == len(y_pred_total), "Lengths must match."
+        unique_labels = np.unique(y_true)
+        class_accuracy = {}
 
-        # Convert 'Y = 0' -> 0, 'Y = 1' -> 1', etc.
-        y_true = [int(label.split("=")[-1].strip()) for label in y_true_total]
-        y_pred = []
-        for pred in y_pred_total:
-            if pred == "none":
-                y_pred.append(None)
-            else:
-                y_pred.append(int(pred.split("=")[-1].strip()))
-
-        # Find all unique labels in y_true
-        unique_labels = sorted(set(y_true))
-
-        # Initialize counters for each label
-        correct_counts = {label: 0 for label in unique_labels}
-        total_counts = {label: 0 for label in unique_labels}
-
-        for yt, yp in zip(y_true, y_pred):
-            total_counts[yt] += 1
-            if yp is not None and yp == yt:
-                correct_counts[yt] += 1
-
-        # Calculate accuracy for each class
-        accuracies = {}
         for label in unique_labels:
-            if total_counts[label] > 0:
-                accuracies[label] = correct_counts[label] / total_counts[label]
-            else:
-                accuracies[label] = None
+            # Mask for samples belonging to this class
+            mask = y_true == label
+            correct = np.sum(y_pred[mask] == y_true[mask])
+            total = np.sum(mask)
+            accuracy = correct / total if total > 0 else 0.0
+            class_accuracy[label] = accuracy
 
-        return accuracies
+        return class_accuracy
 
 
 class AccuracyCallback(TrainerCallback):
@@ -588,9 +568,7 @@ class AccuracyCallback(TrainerCallback):
         print("y_pred_total:", y_pred_total)
 
         # print out the accuracy
-        acc = self.llm.calculate_accuracy_y_text_list(
-            y_pred=y_pred_total, y_true=y_true_total
-        )  # accuracy_score(y_true_total, y_pred_total)
+        acc = accuracy_score(y_pred=y_pred_total, y_true=y_true_total)
         print(
             f"[AccuracyCallback] Epoch {state.epoch}: {self.mode} accuracy: {acc:.2f}%"
         )
@@ -646,6 +624,7 @@ if __name__ == "__main__":
     llm_run = LLM(name_data=name_data, seed=seed)
 
     # hyperparameters
+    project = "projektarbeit_khoa_quy"
     lora_r = 8
     lora_alpha = 32
     lora_dropout = 0.1
@@ -654,7 +633,7 @@ if __name__ == "__main__":
     downsampling_n_instances = None
     downsampling_n_instances_train = 400
     downsampling_n_instances_test = 160
-    name_feature = True
+    name_feature = False
     save = False
     quantized = True
     batch_size = 1
@@ -662,6 +641,7 @@ if __name__ == "__main__":
     learning_rate = 0.001
     weight_decay = 0.001
     max_new_tokens = 5
+    save_model = False
     epochs = 150
 
     # # init llm hst
@@ -705,5 +685,6 @@ if __name__ == "__main__":
         learning_rate=learning_rate,
         weight_decay=weight_decay,
         max_new_tokens=max_new_tokens,
+        save_model=save_model,
         epochs=epochs,
     )
