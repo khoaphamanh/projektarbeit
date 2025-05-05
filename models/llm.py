@@ -1,9 +1,3 @@
-import os
-
-# Set environment variable before torch is imported
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
-
-
 from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
@@ -33,6 +27,9 @@ import wandb
 from datetime import datetime
 from sklearn.metrics import accuracy_score
 import re
+
+# Set environment variable before torch is imported
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 # import preprocessing file
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -209,7 +206,7 @@ class LLM(DataPreprocessing):
             elif self.total_vram < 24:
                 batch_size = 3
             else:
-                batch_size = 4
+                batch_size = 6
 
         elif self.name_data == "HST":
             if self.total_vram < 11:
@@ -217,7 +214,7 @@ class LLM(DataPreprocessing):
             elif self.total_vram < 24:
                 batch_size = 3
             else:
-                batch_size = 6
+                batch_size = 8
 
         print("batch_size:", batch_size)
 
@@ -658,7 +655,7 @@ if __name__ == "__main__":
     # downsampling_n_instances = 300
     # downsampling_n_instances_train = None
     # downsampling_n_instances_test = None
-    # name_feature = True
+    # name_feature = False
     # save = False
     # quantized = True
     # batch_size = 1
@@ -666,6 +663,7 @@ if __name__ == "__main__":
     # learning_rate = 0.001
     # weight_decay = 0.001
     # max_new_tokens = 5
+    # save_model = False
     # epochs = 150
 
     llm_run.classification(
