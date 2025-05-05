@@ -210,8 +210,7 @@ class DataPreprocessing(DataAnalysis):
             )
 
         # convert to text and use prompt
-        if name_feature:
-            name_feature = X_df_train.columns
+        name_feature_columns = X_df_train.columns if name_feature else None
 
         # normalize
         if normalize:
@@ -230,13 +229,13 @@ class DataPreprocessing(DataAnalysis):
             train_datasets = self.convert_df_to_text(
                 X_array=X_array_train,
                 y_array=y_array_train,
-                name_feature=name_feature,
+                name_feature_columns=name_feature_columns,
                 system_behavior=system_behavior,
             )
             test_datasets = self.convert_df_to_text(
                 X_array=X_array_test,
                 y_array=y_array_test,
-                name_feature=name_feature,
+                name_feature_columns=name_feature_columns,
                 system_behavior=system_behavior,
             )
         # keep in array
@@ -315,7 +314,9 @@ class DataPreprocessing(DataAnalysis):
         """
         return (np.array(arg) for arg in args)
 
-    def convert_df_to_text(self, X_array, y_array, name_feature, system_behavior):
+    def convert_df_to_text(
+        self, X_array, y_array, name_feature_columns, system_behavior
+    ):
         """
         convert array to text given the X, y and feature name
         """
@@ -323,11 +324,9 @@ class DataPreprocessing(DataAnalysis):
         data_text_list_all_instances = []
 
         # unique labels of y as text
-        unique_labels_string = " or ".join(map(str, np.unique(y_array).tolist()))
-
-        # check if name_feature is given
-        if name_feature is None or name_feature is False:
-            name_feature = list(range(len(y_array)))
+        unique_labels_string = " or ".join(
+            map(str, np.unique(y_array).astype(int).tolist())
+        )
 
         # loop through all samples from X and y
         for i in range(len(X_array)):
@@ -339,22 +338,32 @@ class DataPreprocessing(DataAnalysis):
             for idx, value in enumerate(X_instance):
 
                 # create text instance for all feature values
-                question_one_instance_from_array.append(
-                    "feature {} = {}".format(name_feature[idx], value)
-                )
+                if name_feature_columns is None:
+                    question_one_instance_from_array.append(f"{value:.4f}")
+                else:
+                    question_one_instance_from_array.append(
+                        f"feature {name_feature_columns[idx]} = {value:.4f}"
+                    )
 
             # create text instance for all feature values from one instance from X
             question_one_instance_from_array = ", ".join(
                 question_one_instance_from_array
             )
+
             # create text question instance for one instance from X
-            question_one_instance = (
-                "Tell me if the value of Y is {}. If {}. What should be Y?".format(
-                    unique_labels_string, question_one_instance_from_array
+            if name_feature_columns is None:
+                question_one_instance = f"Tell me if the value of Y is {unique_labels_string}. If the features are: {question_one_instance_from_array}. What should be Y?"
+            else:
+                question_one_instance = (
+                    "Tell me if the value of Y is {}. If {}. What should be Y?".format(
+                        unique_labels_string, question_one_instance_from_array
+                    )
                 )
-            )
+
             # create text answer instance for one instance from X
-            answer_one_instance = y_instance  # old f"Y = {y_instance}"
+            answer_one_instance = (
+                f"Y = {int(y_instance)}"  # y_instance  # old f"Y = {y_instance}"
+            )
 
             # append to data text list of all instance
             data_text_list_all_instances.append(
