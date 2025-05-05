@@ -66,8 +66,10 @@ class LLM(DataPreprocessing):
                 )
         else:
             self.gpus = None
-        print("self.gpus: ", self.gpus)
-        self.n_gpus = len(gpu_info)
+
+        self.n_gpus = len(gpu_info) if self.gpus is not None else 0
+
+        print("self.gpus:", self.gpus)
 
     def load_model(self, quantized=False):
         """
@@ -97,7 +99,6 @@ class LLM(DataPreprocessing):
 
         model.config.use_cache = False
         model.config.pretraining_tp = 1
-        # model.gradient_checkpointing_enable()
 
         return model
 
@@ -138,7 +139,7 @@ class LLM(DataPreprocessing):
         downsampling_n_instances_train=None,
         downsampling_n_instances_test=None,
         name_feature=False,
-        save=False,
+        save_data=False,
     ):
         """
         load data in llama-2 format
@@ -151,28 +152,149 @@ class LLM(DataPreprocessing):
             downsampling_n_instances_test=downsampling_n_instances_test,
             name_feature=name_feature,
             convert_to_text=True,
-            save=save,
+            save_data=save_data,
         )
 
         return train_datasets, test_datasets
 
-    def create_name(self):
+    def create_name_run(self, hpo=False, index_trial=None, index_split=None):
         """
         create name based on datetime and name data
         """
-        name = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        name = f"{self.name_data}_{name}"
+        # name of the run for not hpo case
+        if not hpo:
+            name = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            name = f"{self.name_data}_{name}"
+
+        # name of the run for hpo case
+        else:
+            name = f"{self.name_data}_trial_{index_trial}_split_{index_split}"
 
         return name
 
-    def hyperparameters_configuration_dict(self, print_out=False, **kwargs):
+    def hyperparameters_configurations_dict(self, print_out=False, **kwargs):
         """
-        hyperparameter dictionary
+        Return a hyperparameter dictionary and optionally print it with sorted keys.
         """
         if print_out:
-            for k, v in kwargs.items():
-                print(f"{k}: {v}")
+            for k in sorted(kwargs.keys()):
+                print(f"{k}: {kwargs[k]}")
         return kwargs
+
+    def preparation_training_process(
+        self,
+        train_datasets,
+        test_datasets,
+        lora_r=8,
+        lora_alpha=32,
+        lora_dropout=0.1,
+        extracted_label=None,
+        normalize=False,
+        downsampling_n_instances=None,
+        downsampling_n_instances_train=None,
+        downsampling_n_instances_test=None,
+        name_feature=False,
+        save_data=False,
+        quantized=False,
+        batch_size=1,
+        gradient_accumulation_steps=1,
+        learning_rate=0.0001,
+        max_new_tokens=5,
+        save_model=False,
+        epochs=10,
+        n_splits=None,
+        index_split=None,
+        hpo=False,
+    ):
+        """
+        preparation all things after load data and before the training process
+        """
+
+        # load model, tokenizer and lora config
+        model = self.load_model(quantized=quantized)
+        for name, param in model.named_parameters():
+            print(f"Parameter: {name}, Device: {param.device}")
+
+        # optimizer
+        if quantized:
+            optim = "paged_adamw_32bit"
+        else:
+            optim = "adamw_torch"
+
+        # print the params
+        total_params = sum(p.numel() for p in model.parameters())
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+        # some default hyperparameters
+        name_run = self.create_name_run()
+        project = (
+            "projektarbeit_khoa_quy"
+            if not hpo
+            else f"projektarbeit_cv_{self.name_data}"
+        )
+
+        n_instances_train = len(train_datasets)
+        n_instances_test = len(test_datasets)
+
+        logging_step = np.ceil(
+            len(train_datasets) / (batch_size * gradient_accumulation_steps)
+        )
+        save_strategy = "no" if not save_model else "epoch"
+        output_dir = f"./results_{self.name_data}"
+        group_by_length = True
+        fp16 = True
+        bf16 = False
+        logging_strategy = "epoch"
+
+        dict_hyperparameters = self.hyperparameters_configurations_dict(
+            # hyperparameters model
+            learning_rate=learning_rate,
+            quantized=quantized,
+            lora_r=lora_r,
+            lora_alpha=lora_alpha,
+            lora_dropout=lora_dropout,
+            batch_size=batch_size,
+            gradient_accumulation_steps=gradient_accumulation_steps,
+            optim=optim,
+            epochs=epochs,
+            name_pretrained_model=self.name_model_llama_2,
+            total_params=total_params,
+            trainable_params=trainable_params,
+            n_splits=n_splits,
+            index_split=index_split,
+            # hyperparameter data
+            normalize=normalize,
+            name_data=self.name_data,
+            extracted_label=extracted_label,
+            downsampling_n_instances=downsampling_n_instances,
+            downsampling_n_instances_train=downsampling_n_instances_train,
+            downsampling_n_instances_test=downsampling_n_instances_test,
+            name_feature=name_feature,
+            save_data=save_data,
+            n_instances_train=n_instances_train,
+            n_instances_test=n_instances_test,
+            n_batch_train=np.ceil(n_instances_train / batch_size),
+            n_batch_test=np.ceil(n_instances_test / batch_size),
+            # configurations
+            n_gpus=self.n_gpus,
+            seed=seed,
+            name_run=name_run,
+            logging_step=logging_step,
+            project=project,
+            save_strategy=save_strategy,
+            output_dir=output_dir,
+            group_by_length=group_by_length,
+            fp16=fp16,
+            bf16=bf16,
+            logging_strategy=logging_strategy,
+            max_new_tokens=max_new_tokens,
+            # print out
+            print_out=True,
+        )
+        gpus_id = {f"gpu{i+1}": gpu for i, gpu in enumerate(self.gpus)}
+        dict_hyperparameters = {**dict_hyperparameters, **gpus_id}
+
+        return model, dict_hyperparameters
 
     def classification(
         self,
@@ -186,15 +308,18 @@ class LLM(DataPreprocessing):
         downsampling_n_instances_train=None,
         downsampling_n_instances_test=None,
         name_feature=False,
-        save=False,
+        save_data=False,
         quantized=False,
         batch_size=1,
         gradient_accumulation_steps=1,
         learning_rate=0.0001,
-        weight_decay=0.001,
         max_new_tokens=5,
         save_model=False,
         epochs=10,
+        trial=None,
+        n_splits=None,
+        index_split=None,
+        hpo=False,
     ):
         """
         train llm model on dataset with llama-2 format
@@ -226,11 +351,36 @@ class LLM(DataPreprocessing):
             downsampling_n_instances_train=downsampling_n_instances_train,
             downsampling_n_instances_test=downsampling_n_instances_test,
             name_feature=name_feature,
-            save=save,
+            save_data=save_data,
         )
 
         # load model, tokenizer and lora config
-        model = self.load_model(quantized=quantized)
+        model, dict_hyperparameters = self.preparation_training_process(
+            train_datasets=train_datasets,
+            test_datasets=test_datasets,
+            lora_r=lora_r,
+            lora_alpha=lora_alpha,
+            lora_dropout=lora_dropout,
+            extracted_label=extracted_label,
+            normalize=normalize,
+            downsampling_n_instances=downsampling_n_instances,
+            downsampling_n_instances_train=downsampling_n_instances_train,
+            downsampling_n_instances_test=downsampling_n_instances_test,
+            name_feature=name_feature,
+            save_data=save_data,
+            quantized=quantized,
+            batch_size=batch_size,
+            gradient_accumulation_steps=gradient_accumulation_steps,
+            learning_rate=learning_rate,
+            max_new_tokens=max_new_tokens,
+            save_model=save_model,
+            epochs=epochs,
+            n_splits=n_splits,
+            index_split=index_split,
+            hpo=hpo,
+        )
+
+        # load tokenizer and peft config
         tokenizer = self.load_tokenizer()
         peft_config = self.load_peft_config(
             lora_r=lora_r, lora_alpha=lora_alpha, lora_dropout=lora_dropout
@@ -249,8 +399,8 @@ class LLM(DataPreprocessing):
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
         # init wandb
-        name = self.create_name()
-        hyperparameters_model = self.hyperparameters_configuration_dict(
+        name = self.create_name_run()
+        hyperparameters_model = self.hyperparameters_configurations_dict(
             learning_rate=learning_rate,
             quantized=quantized,
             lora_r=lora_r,
@@ -268,13 +418,13 @@ class LLM(DataPreprocessing):
         configurations["n_params_trainable"] = trainable_params
         configurations["seed"] = self.seed
         configurations["name_model"] = self.name_model_llama_2
-        configurations = self.hyperparameters_configuration_dict(
+        configurations = self.hyperparameters_configurations_dict(
             **configurations, print_out=True
         )
 
         n_instances_train = len(train_datasets)
         n_instances_test = len(test_datasets)
-        hyperparameters_data = self.hyperparameters_configuration_dict(
+        hyperparameters_data = self.hyperparameters_configurations_dict(
             name_data=self.name_data,
             extracted_label=extracted_label,
             normalize=normalize,
@@ -282,7 +432,7 @@ class LLM(DataPreprocessing):
             downsampling_n_instances_train=downsampling_n_instances_train,
             downsampling_n_instances_test=downsampling_n_instances_test,
             name_feature=name_feature,
-            save=save,
+            save=save_data,
             n_instances_train=n_instances_train,
             n_instances_test=n_instances_test,
             n_batch_train=np.ceil(n_instances_train / batch_size),
@@ -294,7 +444,9 @@ class LLM(DataPreprocessing):
             project=project,
             name=name,
             settings=wandb.Settings(
-                code_dir="."  # self.project_root_dir  # os.path.dirname(self.path_models_directory)
+                code_dir=os.path.abspath(
+                    os.path.join(os.path.dirname(__file__), "..")
+                )  # self.project_root_dir  # os.path.dirname(self.path_models_directory)
             ),
             config={
                 "aa_hyperparameters_model": hyperparameters_model,
@@ -316,7 +468,8 @@ class LLM(DataPreprocessing):
 
         fp16 = True
         bf16 = False
-        lr_scheduler_type = "constant"  # "cosine"
+        lr_scheduler_type = "constant"  # "cosine_with_restarts" # "cosine"
+        logging_strategy = "epoch"  #  "steps"  # "epoch"
 
         training_arguments = TrainingArguments(
             # configuration parameters
@@ -330,8 +483,7 @@ class LLM(DataPreprocessing):
             fp16=fp16,
             bf16=bf16,
             seed=self.seed,
-            run_name=f"llama-lora-{self.name_data}",
-            logging_strategy="epoch",
+            logging_strategy=logging_strategy,
             save_strategy=save_strategy,
             # train parameters
             num_train_epochs=epochs,
@@ -339,8 +491,7 @@ class LLM(DataPreprocessing):
             logging_steps=logging_step,
             # val parameters
             eval_steps=logging_step,
-            eval_strategy="epoch",
-            metric_for_best_model="eval_loss",
+            eval_strategy=logging_strategy,
             eval_accumulation_steps=gradient_accumulation_steps,
         )
 
@@ -505,6 +656,8 @@ class AccuracyCallback(TrainerCallback):
         self.max_new_tokens = max_new_tokens
         self.dataset = dataset
         self.mode = mode
+        self.last_accuracy = None
+        self.last_loss = None
 
     def on_epoch_end(
         self,
@@ -514,7 +667,7 @@ class AccuracyCallback(TrainerCallback):
         **kwargs,
     ):
         print(
-            f"\n[TrainAccuracyCallback] Epoch {state.epoch} ended. Computing training accuracy..."
+            f"\n[TrainAccuracyCallback] Epoch {state.epoch} ended. Computing training accuracy and loss..."
         )
 
         tokenizer = self.llm.load_tokenizer()
@@ -526,25 +679,38 @@ class AccuracyCallback(TrainerCallback):
 
         y_true_total = []
         y_pred_total = []
+        losses = []
 
         model.eval()
         with torch.no_grad():
             for batch in dataloader:
-                question_prompts = batch["question"]
+                # --- LOSS computation using full text (prompt + answer) ---
+                if "text" not in batch:
+                    raise ValueError(
+                        "Batch must contain 'text' field for loss computation."
+                    )
+                full_texts = batch["text"]
+                encoded = tokenizer(
+                    full_texts, return_tensors="pt", padding=True, truncation=True
+                ).to(device)
+                labels = encoded.input_ids.clone()
+                loss_output = model(**encoded, labels=labels)
+                losses.append(loss_output.loss.item())
+
+                # --- Accuracy computation using question only ---
+                questions = batch["question"]
                 answers = batch["answer"]
 
                 inputs = tokenizer(
-                    question_prompts, return_tensors="pt", padding=True, truncation=True
+                    questions, return_tensors="pt", padding=True, truncation=True
                 ).to(device)
-                # print("inputs shape:", inputs.shape)
 
                 outputs = model.generate(
                     **inputs,
                     max_new_tokens=self.max_new_tokens,
                     do_sample=False,
                     top_p=1.0,
-                )  # remove top_p = 1.0 because already use do_sample
-                # print("outputs shape:", outputs.shape)
+                )
 
                 responses = tokenizer.batch_decode(outputs, skip_special_tokens=True)
 
@@ -554,34 +720,36 @@ class AccuracyCallback(TrainerCallback):
                 y_true_total += y_true
                 y_pred_total += y_pred
 
-                # Print results
                 for idx, response in enumerate(responses):
                     print(f"Sample {idx}:")
-                    print("Question:", question_prompts[idx])
+                    print("Question:", questions[idx])
                     print("Response:", response)
-                    print("Answer:", batch["answer"][idx])
+                    print("Answer:", answers[idx])
 
-        print("y_true_total:", y_true_total)
-        print("y_pred_total:", y_pred_total)
+        # Final metrics
+        self.last_loss = np.mean(losses)
+        self.last_accuracy = accuracy_score(y_pred=y_pred_total, y_true=y_true_total)
 
-        # print out the accuracy
-        acc = accuracy_score(y_pred=y_pred_total, y_true=y_true_total)
         print(
-            f"[AccuracyCallback] Epoch {state.epoch}: {self.mode} accuracy: {acc:.2f}%"
+            f"[AccuracyCallback] Epoch {state.epoch}: {self.mode} loss: {self.last_loss:.4f}"
+        )
+        print(
+            f"[AccuracyCallback] Epoch {state.epoch}: {self.mode} accuracy: {self.last_accuracy:.4f}"
         )
 
         if wandb.run:
             wandb.log(
-                {f"{self.mode}_custom_accuracy": acc, "epoch": state.epoch},
+                {
+                    f"{self.mode}_custom_accuracy": self.last_accuracy,
+                    f"{self.mode}_custom_loss": self.last_loss,
+                    "epoch": state.epoch,
+                },
                 step=state.global_step,
             )
 
-        # print out the accuracy for each class
         acc_each_class = self.llm.class_wise_accuracy(y_true_total, y_pred_total)
         for label, acc_class in acc_each_class.items():
             print(f"Accuracy for class {label}: {acc_class:.4f}")
-
-            # log the accuracy each class
             if wandb.run:
                 wandb.log(
                     {f"class_{label}_custom_accuracy": acc_class, "epoch": state.epoch},
@@ -615,56 +783,54 @@ if __name__ == "__main__":
 
     set_random_seed(seed=seed)
 
-    # init llm hst
-    name_data = "TEP"  # "HST"
-    print("name_data:", name_data)
-    llm_run = LLM(name_data=name_data, seed=seed)
-
-    # hyperparameters
-    project = "projektarbeit_khoa_quy"
-    lora_r = 8
-    lora_alpha = 32
-    lora_dropout = 0.1
-    extracted_label = [0, 1, 4, 5]
-    normalize = True
-    downsampling_n_instances = None
-    downsampling_n_instances_train = 400
-    downsampling_n_instances_test = 160
-    name_feature = False
-    save = False
-    quantized = True
-    batch_size = 1
-    gradient_accumulation_steps = 1
-    learning_rate = 0.001
-    weight_decay = 0.001
-    max_new_tokens = 5
-    save_model = False
-    epochs = 150
-
     # # init llm hst
-    # name_data = "HST"
+    # name_data = "TEP"  # "HST"
     # print("name_data:", name_data)
     # llm_run = LLM(name_data=name_data, seed=seed)
 
     # # hyperparameters
+    # project = "projektarbeit_khoa_quy"
     # lora_r = 8
     # lora_alpha = 32
     # lora_dropout = 0.1
-    # extracted_label = None
+    # extracted_label = [0, 1, 4, 5]
     # normalize = True
-    # downsampling_n_instances = 300
-    # downsampling_n_instances_train = None
-    # downsampling_n_instances_test = None
+    # downsampling_n_instances = None
+    # downsampling_n_instances_train = 400
+    # downsampling_n_instances_test = 160
     # name_feature = False
     # save = False
     # quantized = True
     # batch_size = 1
     # gradient_accumulation_steps = 1
     # learning_rate = 0.001
-    # weight_decay = 0.001
     # max_new_tokens = 5
     # save_model = False
     # epochs = 150
+
+    # init llm hst
+    name_data = "HST"
+    print("name_data:", name_data)
+    llm_run = LLM(name_data=name_data, seed=seed)
+
+    # hyperparameters
+    lora_r = 8
+    lora_alpha = 32
+    lora_dropout = 0.1
+    extracted_label = None
+    normalize = True
+    downsampling_n_instances = 50
+    downsampling_n_instances_train = None
+    downsampling_n_instances_test = None
+    name_feature = False
+    save = False
+    quantized = True
+    batch_size = 1
+    gradient_accumulation_steps = 1
+    learning_rate = 0.001
+    max_new_tokens = 5
+    save_model = False
+    epochs = 15
 
     llm_run.classification(
         lora_r=lora_r,
@@ -676,12 +842,11 @@ if __name__ == "__main__":
         downsampling_n_instances_train=downsampling_n_instances_train,
         downsampling_n_instances_test=downsampling_n_instances_test,
         name_feature=name_feature,
-        save=save,
+        save_data=save,
         quantized=quantized,
         batch_size=batch_size,
         gradient_accumulation_steps=gradient_accumulation_steps,
         learning_rate=learning_rate,
-        weight_decay=weight_decay,
         max_new_tokens=max_new_tokens,
         save_model=save_model,
         epochs=epochs,
