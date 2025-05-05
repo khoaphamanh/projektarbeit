@@ -199,11 +199,13 @@ class LLM(DataPreprocessing):
         batch_size=1,
         gradient_accumulation_steps=1,
         learning_rate=0.0001,
+        lr_scheduler_type="constant",
         max_new_tokens=5,
         save_model=False,
         epochs=10,
         n_splits=None,
         index_split=None,
+        index_trial=None,
         hpo=False,
     ):
         """
@@ -226,7 +228,9 @@ class LLM(DataPreprocessing):
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
         # some default hyperparameters
-        name_run = self.create_name_run()
+        name_run = self.create_name_run(
+            hpo=hpo, index_split=index_split, index_trial=index_trial
+        )
         project = (
             "projektarbeit_khoa_quy"
             if not hpo
@@ -236,8 +240,11 @@ class LLM(DataPreprocessing):
         n_instances_train = len(train_datasets)
         n_instances_test = len(test_datasets)
 
-        logging_step = np.ceil(
+        logging_step_train = np.ceil(
             len(train_datasets) / (batch_size * gradient_accumulation_steps)
+        )
+        logging_step_eval = np.ceil(
+            len(test_datasets) / (batch_size * gradient_accumulation_steps)
         )
         save_strategy = "no" if not save_model else "epoch"
         output_dir = f"./results_{self.name_data}"
@@ -262,6 +269,7 @@ class LLM(DataPreprocessing):
             trainable_params=trainable_params,
             n_splits=n_splits,
             index_split=index_split,
+            lr_scheduler_type=lr_scheduler_type,
             # hyperparameter data
             normalize=normalize,
             name_data=self.name_data,
@@ -277,9 +285,10 @@ class LLM(DataPreprocessing):
             n_batch_test=np.ceil(n_instances_test / batch_size),
             # configurations
             n_gpus=self.n_gpus,
-            seed=seed,
+            seed=self.seed,
             name_run=name_run,
-            logging_step=logging_step,
+            logging_step_train=logging_step_train,
+            logging_step_eval=logging_step_eval,
             project=project,
             save_strategy=save_strategy,
             output_dir=output_dir,
@@ -319,6 +328,7 @@ class LLM(DataPreprocessing):
         trial=None,
         n_splits=None,
         index_split=None,
+        index_trial=None,
         hpo=False,
     ):
         """
@@ -377,6 +387,7 @@ class LLM(DataPreprocessing):
             epochs=epochs,
             n_splits=n_splits,
             index_split=index_split,
+            index_trial=index_trial,
             hpo=hpo,
         )
 
@@ -385,91 +396,40 @@ class LLM(DataPreprocessing):
         peft_config = self.load_peft_config(
             lora_r=lora_r, lora_alpha=lora_alpha, lora_dropout=lora_dropout
         )
-        for name, param in model.named_parameters():
-            print(f"Parameter: {name}, Device: {param.device}")
 
         # optimizer
-        if quantized:
-            optim = "paged_adamw_32bit"
-        else:
-            optim = "adamw_torch"
-
-        # print the params
-        total_params = sum(p.numel() for p in model.parameters())
-        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        optim = dict_hyperparameters["optim"]
 
         # init wandb
-        name = self.create_name_run()
-        hyperparameters_model = self.hyperparameters_configurations_dict(
-            learning_rate=learning_rate,
-            quantized=quantized,
-            lora_r=lora_r,
-            lora_alpha=lora_alpha,
-            lora_dropout=lora_dropout,
-            batch_size=batch_size,
-            gradient_accumulation_steps=gradient_accumulation_steps,
-            epochs=epochs,
-            print_out=True,
-        )
-
-        configurations = {f"gpu{i+1}": gpu for i, gpu in enumerate(self.gpus)}
-        configurations["n_gpus"] = self.n_gpus
-        configurations["n_params"] = total_params
-        configurations["n_params_trainable"] = trainable_params
-        configurations["seed"] = self.seed
-        configurations["name_model"] = self.name_model_llama_2
-        configurations = self.hyperparameters_configurations_dict(
-            **configurations, print_out=True
-        )
-
-        n_instances_train = len(train_datasets)
-        n_instances_test = len(test_datasets)
-        hyperparameters_data = self.hyperparameters_configurations_dict(
-            name_data=self.name_data,
-            extracted_label=extracted_label,
-            normalize=normalize,
-            downsampling_n_instances=downsampling_n_instances,
-            downsampling_n_instances_train=downsampling_n_instances_train,
-            downsampling_n_instances_test=downsampling_n_instances_test,
-            name_feature=name_feature,
-            save=save_data,
-            n_instances_train=n_instances_train,
-            n_instances_test=n_instances_test,
-            n_batch_train=np.ceil(n_instances_train / batch_size),
-            n_batch_test=np.ceil(n_instances_test / batch_size),
-            print_out=True,
-        )
-
+        project = dict_hyperparameters["project"]
+        name_run = dict_hyperparameters["name_run"]
         wandb.init(
             project=project,
-            name=name,
+            name=name_run,
             settings=wandb.Settings(
-                code_dir=os.path.abspath(
-                    os.path.join(os.path.dirname(__file__), "..")
-                )  # self.project_root_dir  # os.path.dirname(self.path_models_directory)
+                code_dir=os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
             ),
             config={
-                "aa_hyperparameters_model": hyperparameters_model,
-                "aa_configurations": configurations,
-                "aa_hyperparameters_data": hyperparameters_data,
+                "aa_dict_hyperparameters": dict_hyperparameters,
             },
             save_code=True,
         )
 
         # training arguments
-        logging_step = 1
-        logging_step = np.ceil(
-            len(train_datasets) / (batch_size * gradient_accumulation_steps)
-        )
+        logging_step_train = dict_hyperparameters["logging_step_train"]
+        logging_step_eval = dict_hyperparameters["logging_step_eval"]
 
-        save_strategy = "no" if not save_model else "epoch"
-        output_dir = f"./results_{self.name_data}"
-        group_by_length = True
+        save_strategy = dict_hyperparameters["save_strategy"]
+        output_dir = dict_hyperparameters["output_dir"]
+        group_by_length = dict_hyperparameters["logging_step_eval"]
 
-        fp16 = True
-        bf16 = False
-        lr_scheduler_type = "constant"  # "cosine_with_restarts" # "cosine"
-        logging_strategy = "epoch"  #  "steps"  # "epoch"
+        fp16 = dict_hyperparameters["fp16"]
+        bf16 = dict_hyperparameters["bf16"]
+
+        lr_scheduler_type = dict_hyperparameters[
+            "lr_scheduler_type"  # "cosine_with_restarts" # "cosine"
+        ]
+        logging_strategy = dict_hyperparameters["logging_strategy"]
 
         training_arguments = TrainingArguments(
             # configuration parameters
@@ -488,34 +448,35 @@ class LLM(DataPreprocessing):
             # train parameters
             num_train_epochs=epochs,
             per_device_train_batch_size=batch_size,
-            logging_steps=logging_step,
+            logging_steps=logging_step_train,
             # val parameters
-            eval_steps=logging_step,
+            eval_steps=logging_step_eval,
             eval_strategy=logging_strategy,
             eval_accumulation_steps=gradient_accumulation_steps,
+            per_device_eval_batch_size=batch_size,
         )
 
         self.training_loop(
             model=model,
-            epochs=epochs,
             train_dataset=train_datasets,
             test_dataset=test_datasets,
             peft_config=peft_config,
             tokenizer=tokenizer,
             max_new_tokens=max_new_tokens,
             training_arguments=training_arguments,
+            trial=trial,
         )
 
     def training_loop(
         self,
         model,
-        epochs,
         train_dataset,
         test_dataset,
         peft_config,
         tokenizer,
         max_new_tokens,
         training_arguments: TrainingArguments,
+        trial=None,
     ):
         """
         training loop
@@ -533,11 +494,17 @@ class LLM(DataPreprocessing):
             args=training_arguments,
             compute_metrics=None,  # self.custom_accuracy,
             callbacks=[
-                AccuracyCallback(self, max_new_tokens, train_dataset, mode="train"),
-                AccuracyCallback(self, max_new_tokens, test_dataset, mode="test"),
+                # MetricsCallback for train data
+                MetricsCallback(
+                    self, max_new_tokens, train_dataset, mode="train", trial=None
+                ),
+                # MetricsCallback for test data
+                MetricsCallback(
+                    self, max_new_tokens, test_dataset, mode="test", trial=trial
+                ),
             ],
         )
-        trainer.train()  # resume_from_checkpoint=True
+        trainer.train()
 
         self.evaluation(
             model=model,
@@ -650,8 +617,8 @@ class LLM(DataPreprocessing):
         return class_accuracy
 
 
-class AccuracyCallback(TrainerCallback):
-    def __init__(self, llm_instance, max_new_tokens, dataset, mode="train"):
+class MetricsCallback(TrainerCallback):
+    def __init__(self, llm_instance, max_new_tokens, dataset, mode="train", trial=None):
         self.llm = llm_instance
         self.max_new_tokens = max_new_tokens
         self.dataset = dataset
@@ -684,12 +651,11 @@ class AccuracyCallback(TrainerCallback):
         model.eval()
         with torch.no_grad():
             for batch in dataloader:
-                # --- LOSS computation using full text (prompt + answer) ---
-                if "text" not in batch:
-                    raise ValueError(
-                        "Batch must contain 'text' field for loss computation."
-                    )
+
+                # input as text
                 full_texts = batch["text"]
+
+                # calculate the loss
                 encoded = tokenizer(
                     full_texts, return_tensors="pt", padding=True, truncation=True
                 ).to(device)
@@ -697,7 +663,7 @@ class AccuracyCallback(TrainerCallback):
                 loss_output = model(**encoded, labels=labels)
                 losses.append(loss_output.loss.item())
 
-                # --- Accuracy computation using question only ---
+                # question and answer as text
                 questions = batch["question"]
                 answers = batch["answer"]
 
@@ -757,97 +723,97 @@ class AccuracyCallback(TrainerCallback):
                 )
 
 
-# run this script
-if __name__ == "__main__":
+# # run this script
+# if __name__ == "__main__":
 
-    seed = 1998
+#     seed = 1998
 
-    def set_random_seed(seed=42):
-        """
-        Sets the random seed for reproducibility in PyTorch, NumPy, and Python's random module.
-        Also ensures CUDA determinism if GPU is available.
-        """
-        random.seed(seed)  # Python random seed
-        np.random.seed(seed)  # NumPy random seed
-        torch.manual_seed(seed)  # PyTorch random seed
-        transformers.set_seed(seed)
+#     def set_random_seed(seed=42):
+#         """
+#         Sets the random seed for reproducibility in PyTorch, NumPy, and Python's random module.
+#         Also ensures CUDA determinism if GPU is available.
+#         """
+#         random.seed(seed)  # Python random seed
+#         np.random.seed(seed)  # NumPy random seed
+#         torch.manual_seed(seed)  # PyTorch random seed
+#         transformers.set_seed(seed)
 
-        # Check if CUDA is available
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed(seed)  # Set CUDA seed
-            torch.cuda.manual_seed_all(seed)  # If multi-GPU, set for all GPUs
-            torch.backends.cudnn.deterministic = True  # Ensure deterministic behavior
-            torch.backends.cudnn.benchmark = (
-                False  # Disable CUDNN benchmarking for reproducibility
-            )
+#         # Check if CUDA is available
+#         if torch.cuda.is_available():
+#             torch.cuda.manual_seed(seed)  # Set CUDA seed
+#             torch.cuda.manual_seed_all(seed)  # If multi-GPU, set for all GPUs
+#             torch.backends.cudnn.deterministic = True  # Ensure deterministic behavior
+#             torch.backends.cudnn.benchmark = (
+#                 False  # Disable CUDNN benchmarking for reproducibility
+#             )
 
-    set_random_seed(seed=seed)
+#     set_random_seed(seed=seed)
 
-    # # init llm hst
-    # name_data = "TEP"  # "HST"
-    # print("name_data:", name_data)
-    # llm_run = LLM(name_data=name_data, seed=seed)
+#     # # init llm hst
+#     # name_data = "TEP"  # "HST"
+#     # print("name_data:", name_data)
+#     # llm_run = LLM(name_data=name_data, seed=seed)
 
-    # # hyperparameters
-    # project = "projektarbeit_khoa_quy"
-    # lora_r = 8
-    # lora_alpha = 32
-    # lora_dropout = 0.1
-    # extracted_label = [0, 1, 4, 5]
-    # normalize = True
-    # downsampling_n_instances = None
-    # downsampling_n_instances_train = 400
-    # downsampling_n_instances_test = 160
-    # name_feature = False
-    # save = False
-    # quantized = True
-    # batch_size = 1
-    # gradient_accumulation_steps = 1
-    # learning_rate = 0.001
-    # max_new_tokens = 5
-    # save_model = False
-    # epochs = 150
+#     # # hyperparameters
+#     # project = "projektarbeit_khoa_quy"
+#     # lora_r = 8
+#     # lora_alpha = 32
+#     # lora_dropout = 0.1
+#     # extracted_label = [0, 1, 4, 5]
+#     # normalize = True
+#     # downsampling_n_instances = None
+#     # downsampling_n_instances_train = 400
+#     # downsampling_n_instances_test = 160
+#     # name_feature = False
+#     # save = False
+#     # quantized = True
+#     # batch_size = 1
+#     # gradient_accumulation_steps = 1
+#     # learning_rate = 0.001
+#     # max_new_tokens = 5
+#     # save_model = False
+#     # epochs = 150
 
-    # init llm hst
-    name_data = "HST"
-    print("name_data:", name_data)
-    llm_run = LLM(name_data=name_data, seed=seed)
+#     # init llm hst
+#     name_data = "HST"
+#     print("name_data:", name_data)
+#     llm_run = LLM(name_data=name_data, seed=seed)
 
-    # hyperparameters
-    lora_r = 8
-    lora_alpha = 32
-    lora_dropout = 0.1
-    extracted_label = None
-    normalize = True
-    downsampling_n_instances = 50
-    downsampling_n_instances_train = None
-    downsampling_n_instances_test = None
-    name_feature = False
-    save = False
-    quantized = True
-    batch_size = 1
-    gradient_accumulation_steps = 1
-    learning_rate = 0.001
-    max_new_tokens = 5
-    save_model = False
-    epochs = 15
+#     # hyperparameters
+#     lora_r = 8
+#     lora_alpha = 32
+#     lora_dropout = 0.1
+#     extracted_label = None
+#     normalize = True
+#     downsampling_n_instances = 50
+#     downsampling_n_instances_train = None
+#     downsampling_n_instances_test = None
+#     name_feature = False
+#     save = False
+#     quantized = True
+#     batch_size = 1
+#     gradient_accumulation_steps = 1
+#     learning_rate = 0.001
+#     max_new_tokens = 5
+#     save_model = False
+#     epochs = 15
 
-    llm_run.classification(
-        lora_r=lora_r,
-        lora_alpha=lora_alpha,
-        lora_dropout=lora_dropout,
-        extracted_label=extracted_label,
-        normalize=normalize,
-        downsampling_n_instances=downsampling_n_instances,
-        downsampling_n_instances_train=downsampling_n_instances_train,
-        downsampling_n_instances_test=downsampling_n_instances_test,
-        name_feature=name_feature,
-        save_data=save,
-        quantized=quantized,
-        batch_size=batch_size,
-        gradient_accumulation_steps=gradient_accumulation_steps,
-        learning_rate=learning_rate,
-        max_new_tokens=max_new_tokens,
-        save_model=save_model,
-        epochs=epochs,
-    )
+#     llm_run.classification(
+#         lora_r=lora_r,
+#         lora_alpha=lora_alpha,
+#         lora_dropout=lora_dropout,
+#         extracted_label=extracted_label,
+#         normalize=normalize,
+#         downsampling_n_instances=downsampling_n_instances,
+#         downsampling_n_instances_train=downsampling_n_instances_train,
+#         downsampling_n_instances_test=downsampling_n_instances_test,
+#         name_feature=name_feature,
+#         save_data=save,
+#         quantized=quantized,
+#         batch_size=batch_size,
+#         gradient_accumulation_steps=gradient_accumulation_steps,
+#         learning_rate=learning_rate,
+#         max_new_tokens=max_new_tokens,
+#         save_model=save_model,
+#         epochs=epochs,
+#     )
