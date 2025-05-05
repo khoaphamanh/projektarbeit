@@ -133,12 +133,13 @@ class DataAnalysis:
 if __name__ == "__main__":
 
     data_name = "HST"
+    print_out = False
     hst = DataAnalysis(data_name)
-    hst_data_dict = hst.analysis(print_out=True)
+    hst_data_dict = hst.analysis(print_out=print_out)
     print("hst_data_dict:", hst_data_dict)
 
     data_name = "TEP"
     tep = DataAnalysis(data_name)
     extracted_label = [0, 1, 4, 5]
-    tep_data_dict = tep.analysis(extracted_label=extracted_label, print_out=True)
+    tep_data_dict = tep.analysis(extracted_label=extracted_label, print_out=print_out)
     print("tep_data_dict:", tep_data_dict)
