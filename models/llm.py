@@ -10,7 +10,9 @@ from transformers import (
     TrainerControl,
     TrainerState,
     Trainer,
+    set_seed,
 )
+
 import transformers
 from peft import LoraConfig
 from trl import SFTTrainer
@@ -306,9 +308,60 @@ class LLM(DataPreprocessing):
 
         return model, dict_hyperparameters
 
-    def classification(
+    def load_trainingsargument(self, dict_hyperparameters):
+        """
+        load trainingsargument
+        """
+
+        # training arguments
+        optim = dict_hyperparameters["optim"]
+
+        logging_step_train = dict_hyperparameters["logging_step_train"]
+        logging_step_eval = dict_hyperparameters["logging_step_eval"]
+
+        save_strategy = dict_hyperparameters["save_strategy"]
+        output_dir = dict_hyperparameters["output_dir"]
+        group_by_length = dict_hyperparameters["logging_step_eval"]
+
+        fp16 = dict_hyperparameters["fp16"]
+        bf16 = dict_hyperparameters["bf16"]
+
+        lr_scheduler_type = dict_hyperparameters[
+            "lr_scheduler_type"  # "cosine_with_restarts" # "cosine"
+        ]
+        logging_strategy = dict_hyperparameters["logging_strategy"]
+
+        training_arguments = TrainingArguments(
+            # configuration parameters
+            output_dir=output_dir,
+            report_to="wandb",
+            gradient_accumulation_steps=gradient_accumulation_steps,
+            optim=optim,
+            learning_rate=learning_rate,
+            group_by_length=group_by_length,
+            lr_scheduler_type=lr_scheduler_type,
+            fp16=fp16,
+            bf16=bf16,
+            seed=self.seed,
+            logging_strategy=logging_strategy,
+            save_strategy=save_strategy,
+            # train parameters
+            num_train_epochs=epochs,
+            per_device_train_batch_size=batch_size,
+            logging_steps=logging_step_train,
+            # val parameters
+            eval_steps=logging_step_eval,
+            eval_strategy=logging_strategy,
+            eval_accumulation_steps=gradient_accumulation_steps,
+            per_device_eval_batch_size=batch_size,
+        )
+
+        return training_arguments
+
+    def run_classification(
         self,
-        project="projektarbeit_khoa_quy",
+        train_datasets,
+        test_datasets,
         lora_r=8,
         lora_alpha=32,
         lora_dropout=0.1,
@@ -354,17 +407,6 @@ class LLM(DataPreprocessing):
 
         print("batch_size:", batch_size)
 
-        # load data
-        train_datasets, test_datasets = self.load_data_llm(
-            extracted_label=extracted_label,
-            normalize=normalize,
-            downsampling_n_instances=downsampling_n_instances,
-            downsampling_n_instances_train=downsampling_n_instances_train,
-            downsampling_n_instances_test=downsampling_n_instances_test,
-            name_feature=name_feature,
-            save_data=save_data,
-        )
-
         # load model, tokenizer and lora config
         model, dict_hyperparameters = self.preparation_training_process(
             train_datasets=train_datasets,
@@ -398,9 +440,6 @@ class LLM(DataPreprocessing):
             lora_r=lora_r, lora_alpha=lora_alpha, lora_dropout=lora_dropout
         )
 
-        # optimizer
-        optim = dict_hyperparameters["optim"]
-
         # init wandb
         project = dict_hyperparameters["project"]
         name_run = dict_hyperparameters["name_run"]
@@ -417,47 +456,12 @@ class LLM(DataPreprocessing):
         )
 
         # training arguments
-        logging_step_train = dict_hyperparameters["logging_step_train"]
-        logging_step_eval = dict_hyperparameters["logging_step_eval"]
-
-        save_strategy = dict_hyperparameters["save_strategy"]
-        output_dir = dict_hyperparameters["output_dir"]
-        group_by_length = dict_hyperparameters["logging_step_eval"]
-
-        fp16 = dict_hyperparameters["fp16"]
-        bf16 = dict_hyperparameters["bf16"]
-
-        lr_scheduler_type = dict_hyperparameters[
-            "lr_scheduler_type"  # "cosine_with_restarts" # "cosine"
-        ]
-        logging_strategy = dict_hyperparameters["logging_strategy"]
-
-        training_arguments = TrainingArguments(
-            # configuration parameters
-            output_dir=output_dir,
-            report_to="wandb",
-            gradient_accumulation_steps=gradient_accumulation_steps,
-            optim=optim,
-            learning_rate=learning_rate,
-            group_by_length=group_by_length,
-            lr_scheduler_type=lr_scheduler_type,
-            fp16=fp16,
-            bf16=bf16,
-            seed=self.seed,
-            logging_strategy=logging_strategy,
-            save_strategy=save_strategy,
-            # train parameters
-            num_train_epochs=epochs,
-            per_device_train_batch_size=batch_size,
-            logging_steps=logging_step_train,
-            # val parameters
-            eval_steps=logging_step_eval,
-            eval_strategy=logging_strategy,
-            eval_accumulation_steps=gradient_accumulation_steps,
-            per_device_eval_batch_size=batch_size,
+        training_arguments = self.load_trainingsargument(
+            dict_hyperparameters=dict_hyperparameters
         )
 
-        self.training_loop(
+        # training loop
+        metrics_test = self.training_loop(
             model=model,
             train_dataset=train_datasets,
             test_dataset=test_datasets,
@@ -467,6 +471,8 @@ class LLM(DataPreprocessing):
             training_arguments=training_arguments,
             trial=trial,
         )
+
+        return metrics_test
 
     def training_loop(
         self,
@@ -505,6 +511,7 @@ class LLM(DataPreprocessing):
                 ),
             ],
         )
+        # training loop
         trainer.train()
 
         self.evaluation(
@@ -514,7 +521,7 @@ class LLM(DataPreprocessing):
             batch_size=training_arguments.per_device_train_batch_size * 6,
             max_new_token=max_new_tokens,
         )
-        self.evaluation(
+        metrics_test = self.evaluation(
             model=model,
             datasets=test_dataset,
             tokenizer=tokenizer,
@@ -523,6 +530,8 @@ class LLM(DataPreprocessing):
         )
 
         trainer.evaluate()
+
+        return metrics_test
 
     def compute_metrics_on_dataset(
         self, model, dataset, tokenizer, max_new_tokens, batch_size
@@ -590,6 +599,7 @@ class LLM(DataPreprocessing):
             "y_true": y_true_total,
             "y_pred": y_pred_total,
         }
+
         return metrics
 
     def evaluation(self, model, datasets, tokenizer, batch_size, max_new_token):
@@ -615,6 +625,77 @@ class LLM(DataPreprocessing):
 
         for label, acc in metrics["class_accuracy"].items():
             print(f"[Evaluation] Accuracy for class {label}: {acc:.4f}")
+
+        return metrics
+
+    def classification(
+        self,
+        lora_r=8,
+        lora_alpha=32,
+        lora_dropout=0.1,
+        extracted_label=None,
+        normalize=False,
+        downsampling_n_instances=None,
+        downsampling_n_instances_train=None,
+        downsampling_n_instances_test=None,
+        name_feature=False,
+        save_data=False,
+        quantized=False,
+        batch_size=1,
+        gradient_accumulation_steps=1,
+        learning_rate=0.0001,
+        max_new_tokens=5,
+        save_model=False,
+        epochs=10,
+        trial=None,
+        n_splits=None,
+        index_split=None,
+        index_trial=None,
+        hpo=False,
+    ):
+        """
+        compact classfication give dataset
+        """
+        # load data
+        train_datasets, test_datasets = self.load_data_llm(
+            extracted_label=extracted_label,
+            normalize=normalize,
+            downsampling_n_instances=downsampling_n_instances,
+            downsampling_n_instances_train=downsampling_n_instances_train,
+            downsampling_n_instances_test=downsampling_n_instances_test,
+            name_feature=name_feature,
+            save_data=save_data,
+        )
+
+        # run classification
+        metrics_test = self.run_classification(
+            train_datasets=train_datasets,
+            test_datasets=test_datasets,
+            lora_r=lora_r,
+            lora_alpha=lora_alpha,
+            lora_dropout=lora_dropout,
+            extracted_label=extracted_label,
+            normalize=normalize,
+            downsampling_n_instances=downsampling_n_instances,
+            downsampling_n_instances_train=downsampling_n_instances_train,
+            downsampling_n_instances_test=downsampling_n_instances_test,
+            name_feature=name_feature,
+            save_data=save_data,
+            quantized=quantized,
+            batch_size=batch_size,
+            gradient_accumulation_steps=gradient_accumulation_steps,
+            learning_rate=learning_rate,
+            max_new_tokens=max_new_tokens,
+            save_model=save_model,
+            epochs=epochs,
+            trial=trial,
+            n_splits=n_splits,
+            index_split=index_split,
+            index_trial=index_trial,
+            hpo=hpo,
+        )
+
+        return metrics_test
 
     def extract_label_from_response(self, list_strings):
         """
@@ -736,14 +817,14 @@ if __name__ == "__main__":
             )
 
     set_random_seed(seed=seed)
+    set_seed(seed)
 
-    # # init llm hst
-    # name_data = "TEP"  # "HST"
+    # # init tep hst
+    # name_data = "TEP"
     # print("name_data:", name_data)
     # llm_run = LLM(name_data=name_data, seed=seed)
 
     # # hyperparameters
-    # project = "projektarbeit_khoa_quy"
     # lora_r = 8
     # lora_alpha = 32
     # lora_dropout = 0.1
@@ -753,14 +834,14 @@ if __name__ == "__main__":
     # downsampling_n_instances_train = 400
     # downsampling_n_instances_test = 160
     # name_feature = False
-    # save = False
+    # save_data = False
     # quantized = True
     # batch_size = 1
     # gradient_accumulation_steps = 1
     # learning_rate = 0.001
     # max_new_tokens = 5
     # save_model = False
-    # epochs = 150
+    # epochs = 50
 
     # init llm hst
     name_data = "HST"
@@ -777,14 +858,14 @@ if __name__ == "__main__":
     downsampling_n_instances_train = None
     downsampling_n_instances_test = None
     name_feature = False
-    save = False
+    save_data = False
     quantized = True
     batch_size = 1
     gradient_accumulation_steps = 1
     learning_rate = 0.001
     max_new_tokens = 5
     save_model = False
-    epochs = 15
+    epochs = 50
 
     llm_run.classification(
         lora_r=lora_r,
@@ -796,7 +877,7 @@ if __name__ == "__main__":
         downsampling_n_instances_train=downsampling_n_instances_train,
         downsampling_n_instances_test=downsampling_n_instances_test,
         name_feature=name_feature,
-        save_data=save,
+        save_data=save_data,
         quantized=quantized,
         batch_size=batch_size,
         gradient_accumulation_steps=gradient_accumulation_steps,
