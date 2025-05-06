@@ -26,6 +26,7 @@ import numpy as np
 import wandb
 from datetime import datetime
 from sklearn.metrics import accuracy_score
+import optuna
 import re
 
 # Set environment variable before torch is imported
@@ -523,68 +524,97 @@ class LLM(DataPreprocessing):
 
         trainer.evaluate()
 
-    def evaluation(self, model, datasets, tokenizer, batch_size, max_new_token):
+    def compute_metrics_on_dataset(
+        self, model, dataset, tokenizer, max_new_tokens, batch_size
+    ):
         """
-        evaluation mode, only for check accuracy
+        function to calculate metrics like loss and accuracy after each epoch
         """
-        # total instance
-        y_true_total = []
-        y_pred_total = []
-
-        # dataloader for faster training
-        dataloader = DataLoader(dataset=datasets, batch_size=batch_size, shuffle=False)
-
-        # model in evaluation mode
+        # set model in eval mode
         model.eval()
 
-        start = default_timer()
+        # convert data to dataloader
+        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+
+        # lists
+        y_true_total = []
+        y_pred_total = []
+        losses = []
+
         with torch.inference_mode():
-            for idx, batch in tqdm(
-                enumerate(dataloader), desc="Processing", unit="batch"
-            ):
-                # get question and answer
-                question_prompts = batch["question"]
-                answers = batch["answer"]
+            for batch in tqdm(dataloader, desc="Evaluating", unit="batch"):
 
-                # Tokenize entire batch at once (instead of looping one-by-one)
-                inputs = tokenizer(
-                    question_prompts, return_tensors="pt", padding=True, truncation=True
+                # input as text
+                full_texts = batch["text"]
+
+                # calculate the loss
+                encoded = tokenizer(
+                    full_texts, return_tensors="pt", padding=True, truncation=True
                 ).to(self.device)
+                labels = encoded.input_ids.clone()
+                output = model(**encoded, labels=labels)
+                losses.append(output.loss.item())
 
-                # Generate responses for entire batch at once
-                output_ids = model.generate(
-                    **inputs, max_new_tokens=max_new_token, do_sample=False, top_p=1.0
-                )  # remove top_p = 1.0 because already use do_sample
-
-                # Decode responses
-                responses = tokenizer.batch_decode(
-                    output_ids,
-                    skip_special_tokens=True,
+                # get the prediction as tensor
+                inputs = tokenizer(
+                    batch["question"],
+                    return_tensors="pt",
+                    padding=True,
+                    truncation=True,
+                ).to(self.device)
+                outputs = model.generate(
+                    **inputs, max_new_tokens=max_new_tokens, do_sample=False, top_p=1.0
                 )
-                print("responses:", responses)
 
-                y_true = self.extract_label_from_response(answers)
-                y_true_total = y_true_total + y_true
+                # prediction as text
+                responses = tokenizer.batch_decode(outputs, skip_special_tokens=True)
 
+                # ground true
+                answer = batch["answer"]
                 y_pred = self.extract_label_from_response(responses)
-                y_pred_total = y_pred_total + y_pred
+                y_true = self.extract_label_from_response(answer)
 
-                # Print results
-                for idx, response in enumerate(responses):
-                    print(f"Sample {idx}:")
-                    print("Question:", question_prompts[idx])
-                    print("Response:", response)
-                    print("Answer:", batch["answer"][idx])
+                # add to list
+                y_pred_total += y_pred
+                y_true_total += y_true
 
-        print("y_true_total:", y_true_total)
+        # print out the y list
         print("y_pred_total:", y_pred_total)
+        print("y_true_total:", y_true_total)
 
-        # calculate accuracy score
-        accuracy = accuracy_score(y_pred=y_pred_total, y_true=y_true_total)
-        print("accuracy:", accuracy)
+        # return the metrics
+        metrics = {
+            "accuracy": accuracy_score(y_true_total, y_pred_total),
+            "loss": np.mean(losses),
+            "class_accuracy": self.class_wise_accuracy(y_true_total, y_pred_total),
+            "y_true": y_true_total,
+            "y_pred": y_pred_total,
+        }
+        return metrics
+
+    def evaluation(self, model, datasets, tokenizer, batch_size, max_new_token):
+        """
+        evaluation at the end of the intire process
+        """
+        print("\n[Evaluation] Running evaluation loop...")
+        start = default_timer()
+
+        metrics = self.compute_metrics_on_dataset(
+            model=model,
+            dataset=datasets,
+            tokenizer=tokenizer,
+            max_new_tokens=max_new_token,
+            batch_size=batch_size,
+        )
+
         end = default_timer()
-        duration = end - start
-        print("duration:", duration)
+
+        print(f"[Evaluation] Accuracy: {metrics['accuracy']:.4f}")
+        print(f"[Evaluation] Loss: {metrics['loss']:.4f}")
+        print(f"[Evaluation] Time taken: {end - start:.2f}s")
+
+        for label, acc in metrics["class_accuracy"].items():
+            print(f"[Evaluation] Accuracy for class {label}: {acc:.4f}")
 
     def extract_label_from_response(self, list_strings):
         """
@@ -592,7 +622,7 @@ class LLM(DataPreprocessing):
         """
         # Regular expression to match "Y =" followed by any number (integer or float)
         list_match = [re.search(r"Y\s*=\s*(-?\d+(\.\d+)?)", i) for i in list_strings]
-        list_y = [i.group() if i else 99 for i in list_match]
+        list_y = [i.group() if i else "Y = 99" for i in list_match]
 
         return list_y
 
@@ -618,90 +648,44 @@ class LLM(DataPreprocessing):
 
 
 class MetricsCallback(TrainerCallback):
-    def __init__(self, llm_instance, max_new_tokens, dataset, mode="train", trial=None):
+    def __init__(
+        self, llm_instance: LLM, max_new_tokens, dataset, mode="train", trial=None
+    ):
         self.llm = llm_instance
         self.max_new_tokens = max_new_tokens
         self.dataset = dataset
         self.mode = mode
         self.last_accuracy = None
         self.last_loss = None
+        self.trial = trial
 
     def on_epoch_end(
-        self,
-        args,
-        state: TrainerState,
-        control: TrainerControl,
-        **kwargs,
+        self, args, state: TrainerState, control: TrainerControl, **kwargs
     ):
-        print(
-            f"\n[TrainAccuracyCallback] Epoch {state.epoch} ended. Computing training accuracy and loss..."
-        )
+        print(f"\n[MetricsCallback] Epoch {state.epoch} ended. Computing metrics...")
 
+        # load tokenizer
         tokenizer = self.llm.load_tokenizer()
+
+        # load model
         model = kwargs["model"]
-        device = self.llm.device
         batch_size = args.per_device_train_batch_size * 6
 
-        dataloader = DataLoader(self.dataset, batch_size=batch_size, shuffle=False)
-
-        y_true_total = []
-        y_pred_total = []
-        losses = []
-
-        model.eval()
-        with torch.no_grad():
-            for batch in dataloader:
-
-                # input as text
-                full_texts = batch["text"]
-
-                # calculate the loss
-                encoded = tokenizer(
-                    full_texts, return_tensors="pt", padding=True, truncation=True
-                ).to(device)
-                labels = encoded.input_ids.clone()
-                loss_output = model(**encoded, labels=labels)
-                losses.append(loss_output.loss.item())
-
-                # question and answer as text
-                questions = batch["question"]
-                answers = batch["answer"]
-
-                inputs = tokenizer(
-                    questions, return_tensors="pt", padding=True, truncation=True
-                ).to(device)
-
-                outputs = model.generate(
-                    **inputs,
-                    max_new_tokens=self.max_new_tokens,
-                    do_sample=False,
-                    top_p=1.0,
-                )
-
-                responses = tokenizer.batch_decode(outputs, skip_special_tokens=True)
-
-                y_pred = self.llm.extract_label_from_response(responses)
-                y_true = self.llm.extract_label_from_response(answers)
-
-                y_true_total += y_true
-                y_pred_total += y_pred
-
-                for idx, response in enumerate(responses):
-                    print(f"Sample {idx}:")
-                    print("Question:", questions[idx])
-                    print("Response:", response)
-                    print("Answer:", answers[idx])
-
-        # Final metrics
-        self.last_loss = np.mean(losses)
-        self.last_accuracy = accuracy_score(y_pred=y_pred_total, y_true=y_true_total)
-
-        print(
-            f"[AccuracyCallback] Epoch {state.epoch}: {self.mode} loss: {self.last_loss:.4f}"
+        # get the metrics
+        metrics = self.llm.compute_metrics_on_dataset(
+            model=model,
+            dataset=self.dataset,
+            tokenizer=tokenizer,
+            max_new_tokens=self.max_new_tokens,
+            batch_size=batch_size,
         )
-        print(
-            f"[AccuracyCallback] Epoch {state.epoch}: {self.mode} accuracy: {self.last_accuracy:.4f}"
-        )
+
+        # report the metrics
+        self.last_accuracy = metrics["accuracy"]
+        self.last_loss = metrics["loss"]
+
+        print(f"[MetricsCallback] Accuracy: {self.last_accuracy:.4f}")
+        print(f"[MetricsCallback] Loss: {self.last_loss:.4f}")
 
         if wandb.run:
             wandb.log(
@@ -713,107 +697,111 @@ class MetricsCallback(TrainerCallback):
                 step=state.global_step,
             )
 
-        acc_each_class = self.llm.class_wise_accuracy(y_true_total, y_pred_total)
-        for label, acc_class in acc_each_class.items():
-            print(f"Accuracy for class {label}: {acc_class:.4f}")
+        for label, acc in metrics["class_accuracy"].items():
+            print(f"[MetricsCallback] Class {label} accuracy: {acc:.4f}")
             if wandb.run:
                 wandb.log(
-                    {f"class_{label}_custom_accuracy": acc_class, "epoch": state.epoch},
+                    {f"class_{label}_custom_accuracy": acc, "epoch": state.epoch},
                     step=state.global_step,
                 )
 
+        if self.trial is not None:
+            self.trial.report(self.last_loss, step=state.epoch)
+            if self.trial.should_prune():
+                raise optuna.exceptions.TrialPruned()
 
-# # run this script
-# if __name__ == "__main__":
 
-#     seed = 1998
+# run this script
+if __name__ == "__main__":
 
-#     def set_random_seed(seed=42):
-#         """
-#         Sets the random seed for reproducibility in PyTorch, NumPy, and Python's random module.
-#         Also ensures CUDA determinism if GPU is available.
-#         """
-#         random.seed(seed)  # Python random seed
-#         np.random.seed(seed)  # NumPy random seed
-#         torch.manual_seed(seed)  # PyTorch random seed
-#         transformers.set_seed(seed)
+    seed = 1998
 
-#         # Check if CUDA is available
-#         if torch.cuda.is_available():
-#             torch.cuda.manual_seed(seed)  # Set CUDA seed
-#             torch.cuda.manual_seed_all(seed)  # If multi-GPU, set for all GPUs
-#             torch.backends.cudnn.deterministic = True  # Ensure deterministic behavior
-#             torch.backends.cudnn.benchmark = (
-#                 False  # Disable CUDNN benchmarking for reproducibility
-#             )
+    def set_random_seed(seed=42):
+        """
+        Sets the random seed for reproducibility in PyTorch, NumPy, and Python's random module.
+        Also ensures CUDA determinism if GPU is available.
+        """
+        random.seed(seed)  # Python random seed
+        np.random.seed(seed)  # NumPy random seed
+        torch.manual_seed(seed)  # PyTorch random seed
+        transformers.set_seed(seed)
 
-#     set_random_seed(seed=seed)
+        # Check if CUDA is available
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(seed)  # Set CUDA seed
+            torch.cuda.manual_seed_all(seed)  # If multi-GPU, set for all GPUs
+            torch.backends.cudnn.deterministic = True  # Ensure deterministic behavior
+            torch.backends.cudnn.benchmark = (
+                False  # Disable CUDNN benchmarking for reproducibility
+            )
 
-#     # # init llm hst
-#     # name_data = "TEP"  # "HST"
-#     # print("name_data:", name_data)
-#     # llm_run = LLM(name_data=name_data, seed=seed)
+    set_random_seed(seed=seed)
 
-#     # # hyperparameters
-#     # project = "projektarbeit_khoa_quy"
-#     # lora_r = 8
-#     # lora_alpha = 32
-#     # lora_dropout = 0.1
-#     # extracted_label = [0, 1, 4, 5]
-#     # normalize = True
-#     # downsampling_n_instances = None
-#     # downsampling_n_instances_train = 400
-#     # downsampling_n_instances_test = 160
-#     # name_feature = False
-#     # save = False
-#     # quantized = True
-#     # batch_size = 1
-#     # gradient_accumulation_steps = 1
-#     # learning_rate = 0.001
-#     # max_new_tokens = 5
-#     # save_model = False
-#     # epochs = 150
+    # # init llm hst
+    # name_data = "TEP"  # "HST"
+    # print("name_data:", name_data)
+    # llm_run = LLM(name_data=name_data, seed=seed)
 
-#     # init llm hst
-#     name_data = "HST"
-#     print("name_data:", name_data)
-#     llm_run = LLM(name_data=name_data, seed=seed)
+    # # hyperparameters
+    # project = "projektarbeit_khoa_quy"
+    # lora_r = 8
+    # lora_alpha = 32
+    # lora_dropout = 0.1
+    # extracted_label = [0, 1, 4, 5]
+    # normalize = True
+    # downsampling_n_instances = None
+    # downsampling_n_instances_train = 400
+    # downsampling_n_instances_test = 160
+    # name_feature = False
+    # save = False
+    # quantized = True
+    # batch_size = 1
+    # gradient_accumulation_steps = 1
+    # learning_rate = 0.001
+    # max_new_tokens = 5
+    # save_model = False
+    # epochs = 150
 
-#     # hyperparameters
-#     lora_r = 8
-#     lora_alpha = 32
-#     lora_dropout = 0.1
-#     extracted_label = None
-#     normalize = True
-#     downsampling_n_instances = 50
-#     downsampling_n_instances_train = None
-#     downsampling_n_instances_test = None
-#     name_feature = False
-#     save = False
-#     quantized = True
-#     batch_size = 1
-#     gradient_accumulation_steps = 1
-#     learning_rate = 0.001
-#     max_new_tokens = 5
-#     save_model = False
-#     epochs = 15
+    # init llm hst
+    name_data = "HST"
+    print("name_data:", name_data)
+    llm_run = LLM(name_data=name_data, seed=seed)
 
-#     llm_run.classification(
-#         lora_r=lora_r,
-#         lora_alpha=lora_alpha,
-#         lora_dropout=lora_dropout,
-#         extracted_label=extracted_label,
-#         normalize=normalize,
-#         downsampling_n_instances=downsampling_n_instances,
-#         downsampling_n_instances_train=downsampling_n_instances_train,
-#         downsampling_n_instances_test=downsampling_n_instances_test,
-#         name_feature=name_feature,
-#         save_data=save,
-#         quantized=quantized,
-#         batch_size=batch_size,
-#         gradient_accumulation_steps=gradient_accumulation_steps,
-#         learning_rate=learning_rate,
-#         max_new_tokens=max_new_tokens,
-#         save_model=save_model,
-#         epochs=epochs,
-#     )
+    # hyperparameters
+    lora_r = 8
+    lora_alpha = 32
+    lora_dropout = 0.1
+    extracted_label = None
+    normalize = True
+    downsampling_n_instances = 300
+    downsampling_n_instances_train = None
+    downsampling_n_instances_test = None
+    name_feature = False
+    save = False
+    quantized = True
+    batch_size = 1
+    gradient_accumulation_steps = 1
+    learning_rate = 0.001
+    max_new_tokens = 5
+    save_model = False
+    epochs = 15
+
+    llm_run.classification(
+        lora_r=lora_r,
+        lora_alpha=lora_alpha,
+        lora_dropout=lora_dropout,
+        extracted_label=extracted_label,
+        normalize=normalize,
+        downsampling_n_instances=downsampling_n_instances,
+        downsampling_n_instances_train=downsampling_n_instances_train,
+        downsampling_n_instances_test=downsampling_n_instances_test,
+        name_feature=name_feature,
+        save_data=save,
+        quantized=quantized,
+        batch_size=batch_size,
+        gradient_accumulation_steps=gradient_accumulation_steps,
+        learning_rate=learning_rate,
+        max_new_tokens=max_new_tokens,
+        save_model=save_model,
+        epochs=epochs,
+    )
