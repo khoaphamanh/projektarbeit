@@ -10,9 +10,8 @@ from transformers import (
     TrainerControl,
     TrainerState,
     Trainer,
-    set_seed,
 )
-
+from sklearn.utils import check_random_state
 import transformers
 from peft import LoraConfig
 from trl import SFTTrainer
@@ -469,6 +468,7 @@ class LLM(DataPreprocessing):
             tokenizer=tokenizer,
             max_new_tokens=max_new_tokens,
             training_arguments=training_arguments,
+            index_split=index_split,
             trial=trial,
         )
 
@@ -483,6 +483,7 @@ class LLM(DataPreprocessing):
         tokenizer,
         max_new_tokens,
         training_arguments: TrainingArguments,
+        index_split=None,
         trial=None,
     ):
         """
@@ -503,11 +504,23 @@ class LLM(DataPreprocessing):
             callbacks=[
                 # MetricsCallback for train data
                 MetricsCallback(
-                    self, max_new_tokens, train_dataset, mode="train", trial=None
+                    self,
+                    max_new_tokens,
+                    train_dataset,
+                    mode="train",
+                    epochs=epochs,
+                    index_split=index_split,
+                    trial=None,
                 ),
                 # MetricsCallback for test data
                 MetricsCallback(
-                    self, max_new_tokens, test_dataset, mode="test", trial=trial
+                    self,
+                    max_new_tokens,
+                    test_dataset,
+                    mode="test",
+                    epochs=epochs,
+                    index_split=index_split,
+                    trial=trial,
                 ),
             ],
         )
@@ -730,7 +743,14 @@ class LLM(DataPreprocessing):
 
 class MetricsCallback(TrainerCallback):
     def __init__(
-        self, llm_instance: LLM, max_new_tokens, dataset, mode="train", trial=None
+        self,
+        llm_instance: LLM,
+        max_new_tokens,
+        dataset,
+        mode="train",
+        epochs=None,
+        index_split=None,
+        trial=None,
     ):
         self.llm = llm_instance
         self.max_new_tokens = max_new_tokens
@@ -739,6 +759,8 @@ class MetricsCallback(TrainerCallback):
         self.last_accuracy = None
         self.last_loss = None
         self.trial = trial
+        self.epochs = epochs
+        self.index_split = index_split
 
     def on_epoch_end(
         self, args, state: TrainerState, control: TrainerControl, **kwargs
@@ -782,13 +804,18 @@ class MetricsCallback(TrainerCallback):
             print(f"[MetricsCallback] Class {label} accuracy: {acc:.4f}")
             if wandb.run:
                 wandb.log(
-                    {f"class_{label}_custom_accuracy": acc, "epoch": state.epoch},
+                    {f"class_{label}_custom_accuracy": acc},
                     step=state.global_step,
                 )
 
         if self.trial is not None:
-            self.trial.report(self.last_loss, step=state.epoch)
-            if self.trial.should_prune():
+            self.trial.report(
+                self.last_loss, step=self.epochs * self.index_split + state.epoch
+            )
+            if self.trial.should_prune() or torch(self.last_loss).is_nan():
+                print(
+                    f"[MetricsCallback] Trial {self.trial.number} pruned at split {self.index_split} epoch {state.epoch}"
+                )
                 raise optuna.exceptions.TrialPruned()
 
 
@@ -798,53 +825,27 @@ if __name__ == "__main__":
     seed = 1998
 
     def set_random_seed(seed=42):
-        """
-        Sets the random seed for reproducibility in PyTorch, NumPy, and Python's random module.
-        Also ensures CUDA determinism if GPU is available.
-        """
-        random.seed(seed)  # Python random seed
-        np.random.seed(seed)  # NumPy random seed
-        torch.manual_seed(seed)  # PyTorch random seed
-        transformers.set_seed(seed)
+        import random
+        import numpy as np
+        import torch
+        import transformers
 
-        # Check if CUDA is available
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        transformers.set_seed(seed)
+        check_random_state(seed)
+
         if torch.cuda.is_available():
-            torch.cuda.manual_seed(seed)  # Set CUDA seed
-            torch.cuda.manual_seed_all(seed)  # If multi-GPU, set for all GPUs
-            torch.backends.cudnn.deterministic = True  # Ensure deterministic behavior
-            torch.backends.cudnn.benchmark = (
-                False  # Disable CUDNN benchmarking for reproducibility
-            )
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
 
     set_random_seed(seed=seed)
-    set_seed(seed)
 
-    # # init tep hst
-    # name_data = "TEP"
-    # print("name_data:", name_data)
-    # llm_run = LLM(name_data=name_data, seed=seed)
-
-    # # hyperparameters
-    # lora_r = 8
-    # lora_alpha = 32
-    # lora_dropout = 0.1
-    # extracted_label = [0, 1, 4, 5]
-    # normalize = True
-    # downsampling_n_instances = None
-    # downsampling_n_instances_train = 400
-    # downsampling_n_instances_test = 160
-    # name_feature = False
-    # save_data = False
-    # quantized = True
-    # batch_size = 1
-    # gradient_accumulation_steps = 1
-    # learning_rate = 0.001
-    # max_new_tokens = 5
-    # save_model = False
-    # epochs = 50
-
-    # init llm hst
-    name_data = "HST"
+    # init tep
+    name_data = "TEP"
     print("name_data:", name_data)
     llm_run = LLM(name_data=name_data, seed=seed)
 
@@ -852,11 +853,11 @@ if __name__ == "__main__":
     lora_r = 8
     lora_alpha = 32
     lora_dropout = 0.1
-    extracted_label = None
+    extracted_label = [0, 1, 4, 5]
     normalize = True
-    downsampling_n_instances = 300
-    downsampling_n_instances_train = None
-    downsampling_n_instances_test = None
+    downsampling_n_instances = None
+    downsampling_n_instances_train = 400
+    downsampling_n_instances_test = 160
     name_feature = False
     save_data = False
     quantized = True
@@ -866,6 +867,30 @@ if __name__ == "__main__":
     max_new_tokens = 5
     save_model = False
     epochs = 50
+
+    # # init llm hst
+    # name_data = "HST"
+    # print("name_data:", name_data)
+    # llm_run = LLM(name_data=name_data, seed=seed)
+
+    # # hyperparameters
+    # lora_r = 8
+    # lora_alpha = 32
+    # lora_dropout = 0.1
+    # extracted_label = None
+    # normalize = True
+    # downsampling_n_instances = 300
+    # downsampling_n_instances_train = None
+    # downsampling_n_instances_test = None
+    # name_feature = False
+    # save_data = False
+    # quantized = True
+    # batch_size = 1
+    # gradient_accumulation_steps = 1
+    # learning_rate = 0.001
+    # max_new_tokens = 5
+    # save_model = False
+    # epochs = 50
 
     llm_run.classification(
         lora_r=lora_r,
