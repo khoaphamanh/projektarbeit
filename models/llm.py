@@ -32,6 +32,7 @@ import re
 
 # Set environment variable before torch is imported
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 # import preprocessing file
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -123,6 +124,10 @@ class LLM(DataPreprocessing):
         """
         load LoRA Config
         """
+        # set seed for reproducibility
+        torch.manual_seed(seed)
+
+        # load peft config
         peft_config = LoraConfig(
             lora_alpha=lora_alpha,
             lora_dropout=lora_dropout,
@@ -325,13 +330,21 @@ class LLM(DataPreprocessing):
         fp16 = dict_hyperparameters["fp16"]
         bf16 = dict_hyperparameters["bf16"]
 
-        lr_scheduler_type = dict_hyperparameters[
-            "lr_scheduler_type"  # "cosine_with_restarts" # "cosine"
-        ]
+        lr_scheduler_type = dict_hyperparameters["lr_scheduler_type"]
         logging_strategy = dict_hyperparameters["logging_strategy"]
 
+        gradient_accumulation_steps = dict_hyperparameters[
+            "gradient_accumulation_steps"
+        ]
+        batch_size = dict_hyperparameters["batch_size"]
+        learning_rate = dict_hyperparameters["learning_rate"]
+        epochs = dict_hyperparameters["epochs"]
+
+        # load training arguments
         training_arguments = TrainingArguments(
             # configuration parameters
+            seed=self.seed,
+            data_seed=self.seed,
             output_dir=output_dir,
             report_to="wandb",
             gradient_accumulation_steps=gradient_accumulation_steps,
@@ -341,7 +354,6 @@ class LLM(DataPreprocessing):
             lr_scheduler_type=lr_scheduler_type,
             fp16=fp16,
             bf16=bf16,
-            seed=self.seed,
             logging_strategy=logging_strategy,
             save_strategy=save_strategy,
             # train parameters
@@ -352,6 +364,7 @@ class LLM(DataPreprocessing):
             eval_steps=logging_step_eval,
             eval_strategy=logging_strategy,
             eval_accumulation_steps=gradient_accumulation_steps,
+            metric_for_best_model="eval_loss",
             per_device_eval_batch_size=batch_size,
         )
 
@@ -375,6 +388,7 @@ class LLM(DataPreprocessing):
         batch_size=1,
         gradient_accumulation_steps=1,
         learning_rate=0.0001,
+        lr_scheduler_type="constant",
         max_new_tokens=5,
         save_model=False,
         epochs=10,
@@ -424,6 +438,7 @@ class LLM(DataPreprocessing):
             batch_size=batch_size,
             gradient_accumulation_steps=gradient_accumulation_steps,
             learning_rate=learning_rate,
+            lr_scheduler_type=lr_scheduler_type,
             max_new_tokens=max_new_tokens,
             save_model=save_model,
             epochs=epochs,
@@ -459,6 +474,24 @@ class LLM(DataPreprocessing):
             dict_hyperparameters=dict_hyperparameters
         )
 
+        # # generate check reproeducibility
+        # prompt = "[INST] Tell me a joke about cats [/INST]"
+        # inputs = tokenizer(prompt, return_tensors="pt").to(self.device)
+
+        # model.eval()
+        # with torch.inference_mode():
+        #     outputs = model.generate(
+        #         **inputs,
+        #         max_new_tokens=max_new_tokens,
+        #         do_sample=False,
+        #         top_p=1.0,
+        #     )
+        #     print("outputs:", outputs)
+        #     print("outputs shape:", outputs.shape)
+
+        #     responses = tokenizer.batch_decode(outputs, skip_special_tokens=True)
+        #     print("responses:", responses)
+
         # training loop
         metrics_test = self.training_loop(
             model=model,
@@ -467,6 +500,7 @@ class LLM(DataPreprocessing):
             peft_config=peft_config,
             tokenizer=tokenizer,
             max_new_tokens=max_new_tokens,
+            epochs=epochs,
             training_arguments=training_arguments,
             index_split=index_split,
             trial=trial,
@@ -482,6 +516,7 @@ class LLM(DataPreprocessing):
         peft_config,
         tokenizer,
         max_new_tokens,
+        epochs,
         training_arguments: TrainingArguments,
         index_split=None,
         trial=None,
@@ -657,6 +692,7 @@ class LLM(DataPreprocessing):
         batch_size=1,
         gradient_accumulation_steps=1,
         learning_rate=0.0001,
+        lr_scheduler_type="constant",
         max_new_tokens=5,
         save_model=False,
         epochs=10,
@@ -698,6 +734,7 @@ class LLM(DataPreprocessing):
             batch_size=batch_size,
             gradient_accumulation_steps=gradient_accumulation_steps,
             learning_rate=learning_rate,
+            lr_scheduler_type=lr_scheduler_type,
             max_new_tokens=max_new_tokens,
             save_model=save_model,
             epochs=epochs,
@@ -825,11 +862,6 @@ if __name__ == "__main__":
     seed = 1998
 
     def set_random_seed(seed=42):
-        import random
-        import numpy as np
-        import torch
-        import transformers
-
         random.seed(seed)
         np.random.seed(seed)
         torch.manual_seed(seed)
@@ -837,39 +869,18 @@ if __name__ == "__main__":
         torch.cuda.manual_seed_all(seed)
         transformers.set_seed(seed)
         check_random_state(seed)
-
         if torch.cuda.is_available():
-            torch.backends.cudnn.deterministic = True
-            torch.backends.cudnn.benchmark = False
+            torch.cuda.manual_seed(seed)  # Set CUDA seed
+            torch.cuda.manual_seed_all(seed)  # If multi-GPU, set for all GPUs
+            torch.backends.cudnn.deterministic = True  # Ensure deterministic behavior
+            torch.backends.cudnn.benchmark = (
+                False  # Disable CUDNN benchmarking for reproducibility
+            )
 
     set_random_seed(seed=seed)
 
-    # init tep
-    name_data = "TEP"
-    print("name_data:", name_data)
-    llm_run = LLM(name_data=name_data, seed=seed)
-
-    # hyperparameters
-    lora_r = 8
-    lora_alpha = 32
-    lora_dropout = 0.1
-    extracted_label = [0, 1, 4, 5]
-    normalize = True
-    downsampling_n_instances = None
-    downsampling_n_instances_train = 400
-    downsampling_n_instances_test = 160
-    name_feature = False
-    save_data = False
-    quantized = True
-    batch_size = 1
-    gradient_accumulation_steps = 1
-    learning_rate = 0.001
-    max_new_tokens = 5
-    save_model = False
-    epochs = 50
-
-    # # init llm hst
-    # name_data = "HST"
+    # # init tep
+    # name_data = "TEP"
     # print("name_data:", name_data)
     # llm_run = LLM(name_data=name_data, seed=seed)
 
@@ -877,20 +888,46 @@ if __name__ == "__main__":
     # lora_r = 8
     # lora_alpha = 32
     # lora_dropout = 0.1
-    # extracted_label = None
+    # extracted_label = [0, 1, 4, 5]
     # normalize = True
-    # downsampling_n_instances = 300
-    # downsampling_n_instances_train = None
-    # downsampling_n_instances_test = None
+    # downsampling_n_instances = None
+    # downsampling_n_instances_train = 400
+    # downsampling_n_instances_test = 160
     # name_feature = False
     # save_data = False
     # quantized = True
     # batch_size = 1
     # gradient_accumulation_steps = 1
     # learning_rate = 0.001
+    # lr_scheduler_type = "constant"
     # max_new_tokens = 5
     # save_model = False
     # epochs = 50
+
+    # init llm hst
+    name_data = "HST"
+    print("name_data:", name_data)
+    llm_run = LLM(name_data=name_data, seed=seed)
+
+    # hyperparameters
+    lora_r = 8
+    lora_alpha = 32
+    lora_dropout = 0.1
+    extracted_label = None
+    normalize = True
+    downsampling_n_instances = 50
+    downsampling_n_instances_train = None
+    downsampling_n_instances_test = None
+    name_feature = False
+    save_data = False
+    quantized = True
+    batch_size = 1
+    gradient_accumulation_steps = 1
+    learning_rate = 0.001
+    lr_scheduler_type = "constant"
+    max_new_tokens = 5
+    save_model = False
+    epochs = 50
 
     llm_run.classification(
         lora_r=lora_r,
@@ -907,6 +944,7 @@ if __name__ == "__main__":
         batch_size=batch_size,
         gradient_accumulation_steps=gradient_accumulation_steps,
         learning_rate=learning_rate,
+        lr_scheduler_type=lr_scheduler_type,
         max_new_tokens=max_new_tokens,
         save_model=save_model,
         epochs=epochs,
