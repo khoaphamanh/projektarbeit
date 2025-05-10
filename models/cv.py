@@ -102,6 +102,9 @@ class CrossValidation(LLM):
                     f"Trial {trial.number} - Split {index_split} - Loss val: {loss:.4f} - Accuracy val: {accuracy:.4f}"
                 )
 
+            # free up memory in gpu each split
+            del train_datasets, val_datasets, test_datasets
+
         # calcualte mean
         loss_mean_val = np.mean(list_loss_val)
         accuracy_mean_val = np.mean(list_accuracy_val)

@@ -29,6 +29,7 @@ from datetime import datetime
 from sklearn.metrics import accuracy_score
 import optuna
 import re
+import gc
 
 # Set environment variable before torch is imported
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
@@ -508,6 +509,11 @@ class LLM(DataPreprocessing):
         # finish the wandb run
         wandb.finish()
 
+        # free up memory in gpu
+        del model, tokenizer, peft_config, training_arguments
+        gc.collect()
+        torch.cuda.empty_cache()
+
         return metrics_test
 
     def training_loop(
@@ -678,6 +684,36 @@ class LLM(DataPreprocessing):
 
         return metrics
 
+    def extract_label_from_response(self, list_strings):
+        """
+        use re to extract the label from the list of response or answer
+        """
+        # Regular expression to match "Y =" followed by any number (integer or float)
+        list_match = [re.search(r"Y\s*=\s*(-?\d+(\.\d+)?)", i) for i in list_strings]
+        list_y = [i.group() if i else "Y = 99" for i in list_match]
+
+        return list_y
+
+    def class_wise_accuracy(self, y_true, y_pred):
+        """
+        calculate accuracy each class
+        """
+        y_true = np.array(y_true)
+        y_pred = np.array(y_pred)
+
+        unique_labels = np.unique(y_true)
+        class_accuracy = {}
+
+        for label in unique_labels:
+            # Mask for samples belonging to this class
+            mask = y_true == label
+            correct = np.sum(y_pred[mask] == y_true[mask])
+            total = np.sum(mask)
+            accuracy = correct / total if total > 0 else 0.0
+            class_accuracy[label] = accuracy
+
+        return class_accuracy
+
     def classification(
         self,
         lora_r=8,
@@ -745,37 +781,10 @@ class LLM(DataPreprocessing):
             hpo=hpo,
         )
 
+        # free up memory in gpu
+        del train_datasets, test_datasets, metrics_test
+
         return metrics_test
-
-    def extract_label_from_response(self, list_strings):
-        """
-        use re to extract the label from the list of response or answer
-        """
-        # Regular expression to match "Y =" followed by any number (integer or float)
-        list_match = [re.search(r"Y\s*=\s*(-?\d+(\.\d+)?)", i) for i in list_strings]
-        list_y = [i.group() if i else "Y = 99" for i in list_match]
-
-        return list_y
-
-    def class_wise_accuracy(self, y_true, y_pred):
-        """
-        calculate accuracy each class
-        """
-        y_true = np.array(y_true)
-        y_pred = np.array(y_pred)
-
-        unique_labels = np.unique(y_true)
-        class_accuracy = {}
-
-        for label in unique_labels:
-            # Mask for samples belonging to this class
-            mask = y_true == label
-            correct = np.sum(y_pred[mask] == y_true[mask])
-            total = np.sum(mask)
-            accuracy = correct / total if total > 0 else 0.0
-            class_accuracy[label] = accuracy
-
-        return class_accuracy
 
 
 class MetricsCallback(TrainerCallback):
@@ -853,6 +862,9 @@ class MetricsCallback(TrainerCallback):
                 print(
                     f"[MetricsCallback] Trial {self.trial.number} pruned at split {self.index_split} epoch {state.epoch}"
                 )
+                # finish the wandb run
+                wandb.finish()
+
                 raise optuna.exceptions.TrialPruned()
 
 
