@@ -32,7 +32,6 @@ class CrossValidation(LLM):
         epochs=10,
         trial=None,
         n_splits=None,
-        index_trial=None,
         hpo=False,
     ):
         """
@@ -88,7 +87,6 @@ class CrossValidation(LLM):
                 trial=trial,
                 n_splits=n_splits,
                 index_split=index_split,
-                index_trial=index_trial,
                 hpo=hpo,
             )
 
@@ -97,6 +95,12 @@ class CrossValidation(LLM):
             accuracy = metrics_val["accuracy"]
             list_loss_val.append(loss)
             list_accuracy_val.append(accuracy)
+
+            # print out the metrics
+            if trial is not None:
+                print(
+                    f"Trial {trial.number} - Split {index_split} - Loss val: {loss:.4f} - Accuracy val: {accuracy:.4f}"
+                )
 
         # calcualte mean
         loss_mean_val = np.mean(list_loss_val)
@@ -110,7 +114,7 @@ def objective(trial: optuna.trial.Trial):
     # suggest the parameters with search space
     lora_r = trial.suggest_int("lora_r", low=4, high=32, step=1)
     lora_alpha = trial.suggest_int("lora_alpha", low=4, high=128, step=1)
-    lora_dropout = trial.suggest_float("lora_dropout", low=0.05, high=128, step=1)
+    lora_dropout = trial.suggest_float("lora_dropout", low=0.05, high=1, step=0.01)
     normalize = trial.suggest_categorical("normalize", choices=[True, False])
     learning_rate = trial.suggest_float("learning_rate", low=1e-5, high=1e-2, step=1e-5)
 
@@ -180,7 +184,7 @@ if __name__ == "__main__":
     seed = 1998
     n_trials = 100
     extracted_label = None if name_data == "HST" else [0, 1, 4, 5]
-    downsampling_n_instances = 300 if name_data == "HST" else None
+    downsampling_n_instances = 30 if name_data == "HST" else None
     downsampling_n_instances_train = 400 if name_data == "TEP" else None
     downsampling_n_instances_test = 160 if name_data == "TEP" else None
     quantized = True
