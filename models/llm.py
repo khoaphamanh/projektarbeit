@@ -125,7 +125,7 @@ class LLM(DataPreprocessing):
         load LoRA Config
         """
         # set seed for reproducibility
-        torch.manual_seed(seed)
+        torch.manual_seed(self.seed)
 
         # load peft config
         peft_config = LoraConfig(
@@ -164,7 +164,7 @@ class LLM(DataPreprocessing):
 
         return train_datasets, test_datasets
 
-    def create_name_run(self, hpo=False, index_trial=None, index_split=None):
+    def create_name_run(self, hpo=False, trial=None, index_split=None):
         """
         create name based on datetime and name data
         """
@@ -175,7 +175,7 @@ class LLM(DataPreprocessing):
 
         # name of the run for hpo case
         else:
-            name = f"{self.name_data}_trial_{index_trial}_split_{index_split}"
+            name = f"{self.name_data}_trial_{trial.number}_split_{index_split}"
 
         return name
 
@@ -212,7 +212,7 @@ class LLM(DataPreprocessing):
         epochs=10,
         n_splits=None,
         index_split=None,
-        index_trial=None,
+        trial=None,
         hpo=False,
     ):
         """
@@ -235,9 +235,7 @@ class LLM(DataPreprocessing):
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
         # some default hyperparameters
-        name_run = self.create_name_run(
-            hpo=hpo, index_split=index_split, index_trial=index_trial
-        )
+        name_run = self.create_name_run(hpo=hpo, index_split=index_split, trial=trial)
         project = (
             "projektarbeit_khoa_quy"
             if not hpo
@@ -298,6 +296,7 @@ class LLM(DataPreprocessing):
             logging_step_eval=logging_step_eval,
             project=project,
             save_strategy=save_strategy,
+            save_model=save_model,
             output_dir=output_dir,
             group_by_length=group_by_length,
             fp16=fp16,
@@ -395,28 +394,28 @@ class LLM(DataPreprocessing):
         trial=None,
         n_splits=None,
         index_split=None,
-        index_trial=None,
         hpo=False,
     ):
         """
         train llm model on dataset with llama-2 format
         """
         # control batchsize for suitable vram
-        if self.name_data == "TEP":
-            if self.total_vram < 11:
-                batch_size = 1
-            elif self.total_vram < 24:
-                batch_size = 3
-            else:
-                batch_size = 6
+        if not hpo:
+            if self.name_data == "TEP":
+                if self.total_vram < 11:
+                    batch_size = 1
+                elif self.total_vram < 24:
+                    batch_size = 3
+                else:
+                    batch_size = 6
 
-        elif self.name_data == "HST":
-            if self.total_vram < 11:
-                batch_size = 1
-            elif self.total_vram < 24:
-                batch_size = 3
-            else:
-                batch_size = 8
+            elif self.name_data == "HST":
+                if self.total_vram < 11:
+                    batch_size = 1
+                elif self.total_vram < 24:
+                    batch_size = 3
+                else:
+                    batch_size = 8
 
         print("batch_size:", batch_size)
 
@@ -444,7 +443,7 @@ class LLM(DataPreprocessing):
             epochs=epochs,
             n_splits=n_splits,
             index_split=index_split,
-            index_trial=index_trial,
+            trial=trial,
             hpo=hpo,
         )
 
@@ -506,6 +505,9 @@ class LLM(DataPreprocessing):
             trial=trial,
         )
 
+        # finish the wandb run
+        wandb.finish()
+
         return metrics_test
 
     def training_loop(
@@ -535,7 +537,7 @@ class LLM(DataPreprocessing):
             dataset_text_field="text",
             tokenizer=tokenizer,
             args=training_arguments,
-            compute_metrics=None,  # self.custom_accuracy,
+            compute_metrics=None,
             callbacks=[
                 # MetricsCallback for train data
                 MetricsCallback(
@@ -699,7 +701,6 @@ class LLM(DataPreprocessing):
         trial=None,
         n_splits=None,
         index_split=None,
-        index_trial=None,
         hpo=False,
     ):
         """
@@ -741,7 +742,6 @@ class LLM(DataPreprocessing):
             trial=trial,
             n_splits=n_splits,
             index_split=index_split,
-            index_trial=index_trial,
             hpo=hpo,
         )
 
@@ -849,7 +849,7 @@ class MetricsCallback(TrainerCallback):
             self.trial.report(
                 self.last_loss, step=self.epochs * self.index_split + state.epoch
             )
-            if self.trial.should_prune() or torch(self.last_loss).is_nan():
+            if self.trial.should_prune() or np.isnan(self.last_loss):
                 print(
                     f"[MetricsCallback] Trial {self.trial.number} pruned at split {self.index_split} epoch {state.epoch}"
                 )
@@ -885,7 +885,7 @@ if __name__ == "__main__":
     # llm_run = LLM(name_data=name_data, seed=seed)
 
     # # hyperparameters
-    # lora_r = 8
+    # lora_r = 64
     # lora_alpha = 32
     # lora_dropout = 0.1
     # extracted_label = [0, 1, 4, 5]
@@ -900,7 +900,7 @@ if __name__ == "__main__":
     # gradient_accumulation_steps = 1
     # learning_rate = 0.001
     # lr_scheduler_type = "constant"
-    # max_new_tokens = 5
+    # max_new_tokens = 3
     # save_model = False
     # epochs = 50
 
