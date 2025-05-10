@@ -6,6 +6,7 @@ import numpy as np
 import wandb
 import argparse
 
+
 class CrossValidation(LLM):
     def __init__(self, name_data, seed):
         super().__init__(name_data, seed)
@@ -114,7 +115,11 @@ def objective(trial: optuna.trial.Trial):
     learning_rate = trial.suggest_float("learning_rate", low=1e-5, high=1e-2, step=1e-5)
 
     # conditional hyperparmameters
-    name_feature = trial.suggest_categorical("name_feature", choices=[True, False]) if name_data =="HST" else name_feature = False
+    name_feature = (
+        trial.suggest_categorical("name_feature", choices=[True, False])
+        if name_data == "HST"
+        else False
+    )
 
     # init cv
     cv_run = CrossValidation(
@@ -148,6 +153,7 @@ def objective(trial: optuna.trial.Trial):
 
     return loss_val
 
+
 # run this script
 if __name__ == "__main__":
 
@@ -158,15 +164,19 @@ if __name__ == "__main__":
         "--data_name",
         type=str,
         help="choose data name between 'HST' or 'TEP', default is 'HST'",
-        choices=["HST", "TEP"])
-    
+        choices=["HST", "TEP"],
+    )
+
     args = parser.parse_args()
 
     # set data name
-    name_data = args.data_name if args.data_name else "HST"
+    if args.data_name == "HST":
+        name_data = "HST"
+    elif args.data_name == "TEP":
+        name_data = "TEP"
     print("name_data:", name_data)
 
-    #fix hyperparameters for hpo
+    # fix hyperparameters for hpo
     seed = 1998
     n_trials = 100
     extracted_label = None if name_data == "HST" else [0, 1, 4, 5]
@@ -178,14 +188,13 @@ if __name__ == "__main__":
     gradient_accumulation_steps = 1
     max_new_tokens = 5
     save_model = False
-    epochs = 20
+    epochs = 3
     n_splits = 5
     seed = 1998
     save_data = False
-    hpo =True
+    hpo = True
 
-
-    #path to sqlite database
+    # path to sqlite database
     path_models_directory = os.path.dirname(os.path.abspath(__file__))
     path_hpo_directory = os.path.join(path_models_directory, "hpo")
     os.makedirs(path_hpo_directory, exist_ok=True)
@@ -193,7 +202,7 @@ if __name__ == "__main__":
     path_db_hpo = os.path.join(path_hpo_directory, db_hpo)
     db_hpo_sqlite = f"sqlite:///{path_db_hpo}"
 
-    #path csv optuna
+    # path csv optuna
     path_csv_hpo = os.path.join(path_hpo_directory, f"hpo_{name_data}.csv")
 
     # sampler and pruner in optuna
@@ -211,32 +220,32 @@ if __name__ == "__main__":
         pruner=pruner,
     )
 
-    #export db optuna to csv
+    # export db optuna to csv
     df_trials = study.trials_dataframe()
     df_trials.to_csv(path_csv_hpo, index=False)
 
     # run trials if current trials < n_trials
     if len(study.trials) < n_trials:
-        
-        #check if the last trial is failed
+
+        # check if the last trial is failed
         if len(study.trials) > 0 and study.trials[-1].state in [
-                optuna.trial.TrialState.FAIL,
-                optuna.trial.TrialState.RUNNING,
-            ]:
+            optuna.trial.TrialState.FAIL,
+            optuna.trial.TrialState.RUNNING,
+        ]:
             failed_trial_params = study.trials[-1].params
             study.enqueue_trial(failed_trial_params)
 
-        #run trials
+        # run trials
         study.optimize(
             objective,
             n_trials=n_trials,
             show_progress_bar=True,
-        )   
+        )
 
     else:
         pruned_trials = study.get_trials(
-                deepcopy=False, states=[optuna.trial.TrialState.PRUNED]
-            )
+            deepcopy=False, states=[optuna.trial.TrialState.PRUNED]
+        )
         complete_trials = study.get_trials(
             deepcopy=False, states=[optuna.trial.TrialState.COMPLETE]
         )
@@ -269,7 +278,9 @@ if __name__ == "__main__":
             downsampling_n_instances=downsampling_n_instances,
             downsampling_n_instances_train=downsampling_n_instances_train,
             downsampling_n_instances_test=downsampling_n_instances_test,
-            name_feature=best_trial_params["name_feature"] if name_data == "HST" else False,
+            name_feature=(
+                best_trial_params["name_feature"] if name_data == "HST" else False
+            ),
             save_data=save_data,
             quantized=quantized,
             batch_size=batch_size,
@@ -284,6 +295,6 @@ if __name__ == "__main__":
             hpo=False,
         )
 
-        #report the final test metrics
+        # report the final test metrics
         for key, value in metrics_test.items():
             print(f"{key}: {value}")
