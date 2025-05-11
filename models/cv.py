@@ -5,6 +5,12 @@ from sklearn.model_selection import StratifiedKFold
 import numpy as np
 import wandb
 import argparse
+import gc
+import torch
+
+# Set environment variable before torch is imported
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
 class CrossValidation(LLM):
@@ -90,6 +96,10 @@ class CrossValidation(LLM):
                 hpo=hpo,
             )
 
+            # # clear memory
+            # gc.collect()
+            # torch.cuda.empty_cache()
+
             # append to lists
             loss = metrics_val["loss"]
             accuracy = metrics_val["accuracy"]
@@ -102,8 +112,11 @@ class CrossValidation(LLM):
                     f"Trial {trial.number} - Split {index_split} - Loss val: {loss:.4f} - Accuracy val: {accuracy:.4f}"
                 )
 
-            # free up memory in gpu each split
-            del train_datasets, val_datasets, test_datasets
+            # # Enhanced memory cleanup
+            # del train_datasets, val_datasets, metrics_val
+            # gc.collect()
+            # torch.cuda.empty_cache()
+            # torch.cuda.synchronize()  # Ensure all operations are complete before proceeding
 
         # calcualte mean
         loss_mean_val = np.mean(list_loss_val)

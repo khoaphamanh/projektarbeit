@@ -93,13 +93,16 @@ class LLM(DataPreprocessing):
             model = AutoModelForCausalLM.from_pretrained(
                 self.name_model_llama_2,
                 quantization_config=bnb_config,
-                device_map=self.device_map,
+                #     device_map=self.device_map,
             )
         else:
             model = AutoModelForCausalLM.from_pretrained(
                 self.name_model_llama_2,
-                device_map=self.device_map,
+                # device_map=self.device_map,
             )
+
+        # load model to device
+        model = model.to(self.device)
 
         model.config.use_cache = False
         model.config.pretraining_tp = 1
@@ -356,6 +359,8 @@ class LLM(DataPreprocessing):
             bf16=bf16,
             logging_strategy=logging_strategy,
             save_strategy=save_strategy,
+            save_total_limit=1,
+            gradient_checkpointing=True,
             # train parameters
             num_train_epochs=epochs,
             per_device_train_batch_size=batch_size,
@@ -510,9 +515,9 @@ class LLM(DataPreprocessing):
         wandb.finish()
 
         # free up memory in gpu
-        del model, tokenizer, peft_config, training_arguments
         gc.collect()
         torch.cuda.empty_cache()
+        del model, tokenizer, peft_config, training_arguments
 
         return metrics_test
 
@@ -574,7 +579,7 @@ class LLM(DataPreprocessing):
             model=model,
             datasets=train_dataset,
             tokenizer=tokenizer,
-            batch_size=training_arguments.per_device_train_batch_size * 6,
+            batch_size=training_arguments.per_device_train_batch_size,
             max_new_token=max_new_tokens,
         )
         metrics_test = self.evaluation(
@@ -582,10 +587,10 @@ class LLM(DataPreprocessing):
             datasets=test_dataset,
             tokenizer=tokenizer,
             max_new_token=max_new_tokens,
-            batch_size=training_arguments.per_device_train_batch_size * 6,
+            batch_size=training_arguments.per_device_train_batch_size,
         )
 
-        trainer.evaluate()
+        # trainer.evaluate()
 
         return metrics_test
 
@@ -781,8 +786,8 @@ class LLM(DataPreprocessing):
             hpo=hpo,
         )
 
-        # free up memory in gpu
-        del train_datasets, test_datasets, metrics_test
+        # # free up memory in gpu
+        # del train_datasets, test_datasets, metrics_test
 
         return metrics_test
 
@@ -818,7 +823,7 @@ class MetricsCallback(TrainerCallback):
 
         # load model
         model = kwargs["model"]
-        batch_size = args.per_device_train_batch_size * 6
+        batch_size = args.per_device_train_batch_size
 
         # get the metrics
         metrics = self.llm.compute_metrics_on_dataset(
@@ -891,45 +896,20 @@ if __name__ == "__main__":
 
     set_random_seed(seed=seed)
 
-    # # init tep
-    # name_data = "TEP"
-    # print("name_data:", name_data)
-    # llm_run = LLM(name_data=name_data, seed=seed)
-
-    # # hyperparameters
-    # lora_r = 64
-    # lora_alpha = 32
-    # lora_dropout = 0.1
-    # extracted_label = [0, 1, 4, 5]
-    # normalize = True
-    # downsampling_n_instances = None
-    # downsampling_n_instances_train = 400
-    # downsampling_n_instances_test = 160
-    # name_feature = False
-    # save_data = False
-    # quantized = True
-    # batch_size = 1
-    # gradient_accumulation_steps = 1
-    # learning_rate = 0.001
-    # lr_scheduler_type = "constant"
-    # max_new_tokens = 3
-    # save_model = False
-    # epochs = 50
-
-    # init llm hst
-    name_data = "HST"
+    # init tep
+    name_data = "TEP"
     print("name_data:", name_data)
     llm_run = LLM(name_data=name_data, seed=seed)
 
     # hyperparameters
-    lora_r = 8
+    lora_r = 1024
     lora_alpha = 32
     lora_dropout = 0.1
-    extracted_label = None
+    extracted_label = [0, 1, 4, 5]
     normalize = True
-    downsampling_n_instances = 50
-    downsampling_n_instances_train = None
-    downsampling_n_instances_test = None
+    downsampling_n_instances = None
+    downsampling_n_instances_train = 40
+    downsampling_n_instances_test = 16
     name_feature = False
     save_data = False
     quantized = True
@@ -937,9 +917,34 @@ if __name__ == "__main__":
     gradient_accumulation_steps = 1
     learning_rate = 0.001
     lr_scheduler_type = "constant"
-    max_new_tokens = 5
+    max_new_tokens = 3
     save_model = False
     epochs = 50
+
+    # # init llm hst
+    # name_data = "HST"
+    # print("name_data:", name_data)
+    # llm_run = LLM(name_data=name_data, seed=seed)
+
+    # # hyperparameters
+    # lora_r = 15
+    # lora_alpha = 43
+    # lora_dropout = 0.1
+    # extracted_label = None
+    # normalize = True
+    # downsampling_n_instances = 50
+    # downsampling_n_instances_train = None
+    # downsampling_n_instances_test = None
+    # name_feature = False
+    # save_data = False
+    # quantized = True
+    # batch_size = 1
+    # gradient_accumulation_steps = 1
+    # learning_rate = 0.001
+    # lr_scheduler_type = "constant"
+    # max_new_tokens = 5
+    # save_model = False
+    # epochs = 50
 
     llm_run.classification(
         lora_r=lora_r,
