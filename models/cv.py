@@ -69,6 +69,9 @@ class CrossValidation(LLM):
             train_datasets = train_val_datasets.select(train_idx)
             val_datasets = train_val_datasets.select(val_idx)
 
+            print("before split")
+            self.log_memory_usage()
+
             # run classification
             metrics_val = self.run_classification(
                 train_datasets=train_datasets,
@@ -96,6 +99,8 @@ class CrossValidation(LLM):
                 hpo=hpo,
             )
 
+            print("after split")
+            self.log_memory_usage()
             # # clear memory
             # gc.collect()
             # torch.cuda.empty_cache()
@@ -118,6 +123,8 @@ class CrossValidation(LLM):
             # torch.cuda.empty_cache()
             # torch.cuda.synchronize()  # Ensure all operations are complete before proceeding
 
+            print("end of split")
+            self.log_memory_usage()
         # calcualte mean
         loss_mean_val = np.mean(list_loss_val)
         accuracy_mean_val = np.mean(list_accuracy_val)

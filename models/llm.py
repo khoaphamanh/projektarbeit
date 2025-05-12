@@ -511,6 +511,9 @@ class LLM(DataPreprocessing):
             trial=trial,
         )
 
+        print("after training loop")
+        self.log_memory_usage()
+
         # finish the wandb run
         wandb.finish()
 
@@ -747,6 +750,9 @@ class LLM(DataPreprocessing):
         """
         compact classfication give dataset
         """
+        print("before load data")
+        self.log_memory_usage()
+
         # load data
         train_datasets, test_datasets = self.load_data_llm(
             extracted_label=extracted_label,
@@ -757,6 +763,8 @@ class LLM(DataPreprocessing):
             name_feature=name_feature,
             save_data=save_data,
         )
+        print("after load data")
+        self.log_memory_usage()
 
         # run classification
         metrics_test = self.run_classification(
@@ -786,10 +794,21 @@ class LLM(DataPreprocessing):
             hpo=hpo,
         )
 
+        print("after run classification")
+        self.log_memory_usage()
+
         # # free up memory in gpu
         # del train_datasets, test_datasets, metrics_test
 
         return metrics_test
+
+    def log_memory_usage(self):
+        if torch.cuda.is_available():
+            allocated = torch.cuda.memory_allocated() / 1024**3  # GiB
+            reserved = torch.cuda.memory_reserved() / 1024**3  # GiB
+            print(
+                f"GPU Memory: Allocated {allocated:.2f} GiB, Reserved {reserved:.2f} GiB"
+            )
 
 
 class MetricsCallback(TrainerCallback):
