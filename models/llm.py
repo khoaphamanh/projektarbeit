@@ -29,7 +29,6 @@ from datetime import datetime
 from sklearn.metrics import accuracy_score
 import optuna
 import re
-import gc
 
 # Set environment variable before torch is imported
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
@@ -511,16 +510,11 @@ class LLM(DataPreprocessing):
             trial=trial,
         )
 
-        print("after training loop")
-        self.log_memory_usage()
-
         # finish the wandb run
         wandb.finish()
 
-        # free up memory in gpu
-        gc.collect()
-        torch.cuda.empty_cache()
-        del model, tokenizer, peft_config, training_arguments
+        # model to cpu
+        model = model.to("cpu")
 
         return metrics_test
 
@@ -750,8 +744,6 @@ class LLM(DataPreprocessing):
         """
         compact classfication give dataset
         """
-        print("before load data")
-        self.log_memory_usage()
 
         # load data
         train_datasets, test_datasets = self.load_data_llm(
@@ -763,8 +755,6 @@ class LLM(DataPreprocessing):
             name_feature=name_feature,
             save_data=save_data,
         )
-        print("after load data")
-        self.log_memory_usage()
 
         # run classification
         metrics_test = self.run_classification(
@@ -793,12 +783,6 @@ class LLM(DataPreprocessing):
             index_split=index_split,
             hpo=hpo,
         )
-
-        print("after run classification")
-        self.log_memory_usage()
-
-        # # free up memory in gpu
-        # del train_datasets, test_datasets, metrics_test
 
         return metrics_test
 
