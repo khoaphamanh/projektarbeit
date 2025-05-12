@@ -480,33 +480,34 @@ if __name__ == "__main__":
     #     print(i, j)
     #     for i in j:
     #         print(i)
-    # data_name = "TEP"
-    # extracted_label = [0, 1, 4, 5]
-    # tep = DataPreprocessing(data_name, seed=seed)
-    # tep_train, tep_test = tep.load_data(
-    #     extracted_label=extracted_label,
-    #     normalize=True,
-    #     downsampling_n_instances_train=400,
-    #     downsampling_n_instances_test=160,
-    #     name_feature=True,
-    #     convert_to_text=True,
-    #     save=False,
-    # )
 
-    # for i in tep_train:
-    #     print(i)
-    # print()
-    # for i in tep_test:
-    #     print(i)
+    data_name = "TEP"
+    extracted_label = [0, 1, 4, 5]
+    tep = DataPreprocessing(data_name, seed=seed)
+    tep_train, tep_test = tep.load_data(
+        extracted_label=extracted_label,
+        normalize=True,
+        downsampling_n_instances_train=400,
+        downsampling_n_instances_test=160,
+        name_feature=True,
+        convert_to_text=True,
+        save_data=False,
+    )
 
-    # print(len(tep_train))
-    # print(len(tep_test))
+    for i in tep_train:
+        print(i)
+    print()
+    for i in tep_test:
+        print(i)
 
-    # print("tep_train")
-    # print(tep_train)
+    print(len(tep_train))
+    print(len(tep_test))
 
-    # print("tep_test")
-    # print(tep_test)
+    print("tep_train")
+    print(tep_train)
+
+    print("tep_test")
+    print(tep_test)
 
     # from torch.utils.data import DataLoader
 
@@ -544,8 +545,8 @@ if __name__ == "__main__":
     #     break
 
     # split to train and val
-    split_dataset = hst_train.train_test_split(test_size=0.1, seed=42)
-    print("split_dataset:", split_dataset)
+    # split_dataset = hst_train.train_test_split(test_size=0.1, seed=42)
+    # print("split_dataset:", split_dataset)
 
     end = default_timer()
     print(end - start)

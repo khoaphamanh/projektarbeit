@@ -133,7 +133,7 @@ class DataAnalysis:
 if __name__ == "__main__":
 
     data_name = "HST"
-    print_out = False
+    print_out = True
     hst = DataAnalysis(data_name)
     hst_data_dict = hst.analysis(print_out=print_out)
     print("hst_data_dict:", hst_data_dict)
