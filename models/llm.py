@@ -13,7 +13,7 @@ from transformers import (
 )
 from sklearn.utils import check_random_state
 import transformers
-from peft import LoraConfig
+from peft import LoraConfig, get_peft_model
 from trl import SFTTrainer
 import sys
 import os
@@ -224,8 +224,8 @@ class LLM(DataPreprocessing):
 
         # load model, tokenizer and lora config
         model = self.load_model(quantized=quantized)
-        for name, param in model.named_parameters():
-            print(f"Parameter: {name}, Device: {param.device}")
+        # for name, param in model.named_parameters():
+        #     print(f"Parameter: {name}, Device: {param.device}")
 
         # optimizer
         if quantized:
@@ -327,7 +327,7 @@ class LLM(DataPreprocessing):
 
         save_strategy = dict_hyperparameters["save_strategy"]
         output_dir = dict_hyperparameters["output_dir"]
-        group_by_length = dict_hyperparameters["logging_step_eval"]
+        group_by_length = dict_hyperparameters["group_by_length"]
 
         fp16 = dict_hyperparameters["fp16"]
         bf16 = dict_hyperparameters["bf16"]
@@ -364,12 +364,12 @@ class LLM(DataPreprocessing):
             num_train_epochs=epochs,
             per_device_train_batch_size=batch_size,
             logging_steps=logging_step_train,
-            # val parameters
-            eval_steps=logging_step_eval,
-            eval_strategy=logging_strategy,
-            eval_accumulation_steps=gradient_accumulation_steps,
-            metric_for_best_model="eval_loss",
-            per_device_eval_batch_size=batch_size,
+            # eval parameters
+            # eval_steps=logging_step_eval,
+            # eval_strategy=logging_strategy,
+            # eval_accumulation_steps=gradient_accumulation_steps,
+            # metric_for_best_model="eval_loss",
+            # per_device_eval_batch_size=batch_size,
         )
 
         return training_arguments
@@ -422,7 +422,7 @@ class LLM(DataPreprocessing):
                 else:
                     batch_size = 8
 
-        print("batch_size:", batch_size)
+        # print("batch_size:", batch_size)
 
         # load model, tokenizer and lora config
         model, dict_hyperparameters = self.preparation_training_process(
@@ -478,24 +478,6 @@ class LLM(DataPreprocessing):
             dict_hyperparameters=dict_hyperparameters
         )
 
-        # # generate check reproeducibility
-        # prompt = "[INST] Tell me a joke about cats [/INST]"
-        # inputs = tokenizer(prompt, return_tensors="pt").to(self.device)
-
-        # model.eval()
-        # with torch.inference_mode():
-        #     outputs = model.generate(
-        #         **inputs,
-        #         max_new_tokens=max_new_tokens,
-        #         do_sample=False,
-        #         top_p=1.0,
-        #     )
-        #     print("outputs:", outputs)
-        #     print("outputs shape:", outputs.shape)
-
-        #     responses = tokenizer.batch_decode(outputs, skip_special_tokens=True)
-        #     print("responses:", responses)
-
         # training loop
         metrics_test = self.training_loop(
             model=model,
@@ -534,13 +516,13 @@ class LLM(DataPreprocessing):
         """
         training loop
         """
-
         # train the model
         model.train()
+
         trainer = SFTTrainer(
             model=model,
             train_dataset=train_dataset,
-            eval_dataset=test_dataset,
+            # eval_dataset=test_dataset,
             peft_config=peft_config,
             dataset_text_field="text",
             tokenizer=tokenizer,
@@ -562,23 +544,25 @@ class LLM(DataPreprocessing):
                     self,
                     max_new_tokens,
                     test_dataset,
-                    mode="test",
+                    mode="test" if trial is None else "eval_hpo",
                     epochs=epochs,
                     index_split=index_split,
                     trial=trial,
                 ),
             ],
         )
+
+        # print("after training")
+        total_params = sum(p.numel() for p in model.parameters())
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        print(f"Total parameters: {total_params:,}")
+        print(f"Trainable parameters: {trainable_params:,}")
+        print(f"Trainable %: {100 * trainable_params / total_params:.4f}%")
+
         # training loop
         trainer.train()
 
-        self.evaluation(
-            model=model,
-            datasets=train_dataset,
-            tokenizer=tokenizer,
-            batch_size=training_arguments.per_device_train_batch_size,
-            max_new_token=max_new_tokens,
-        )
+        # calculate the metrics test
         metrics_test = self.evaluation(
             model=model,
             datasets=test_dataset,
@@ -586,8 +570,6 @@ class LLM(DataPreprocessing):
             max_new_token=max_new_tokens,
             batch_size=training_arguments.per_device_train_batch_size,
         )
-
-        # trainer.evaluate()
 
         return metrics_test
 
@@ -609,7 +591,7 @@ class LLM(DataPreprocessing):
         losses = []
 
         with torch.inference_mode():
-            for batch in tqdm(dataloader, desc="Evaluating", unit="batch"):
+            for batch in dataloader:
 
                 # input as text
                 full_texts = batch["text"]
@@ -826,7 +808,7 @@ class MetricsCallback(TrainerCallback):
 
         # load model
         model = kwargs["model"]
-        batch_size = args.per_device_train_batch_size
+        batch_size = args.per_device_train_batch_size * 4
 
         # get the metrics
         metrics = self.llm.compute_metrics_on_dataset(
@@ -866,7 +848,11 @@ class MetricsCallback(TrainerCallback):
             self.trial.report(
                 self.last_loss, step=self.epochs * self.index_split + state.epoch
             )
-            if self.trial.should_prune() or np.isnan(self.last_loss):
+            if (
+                self.trial.should_prune()
+                or np.isnan(self.last_loss)
+                or self.last_accuracy == 0
+            ):
                 print(
                     f"[MetricsCallback] Trial {self.trial.number} pruned at split {self.index_split} epoch {state.epoch}"
                 )
