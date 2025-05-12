@@ -17,6 +17,13 @@ class CrossValidation(LLM):
     def __init__(self, name_data, seed):
         super().__init__(name_data, seed)
 
+        # hpo directory
+        self.path_hpo_directory = os.path.join(self.path_models_directory, "hpo")
+        self.path_hpo_name_data_directory = os.path.join(
+            self.path_hpo_directory, name_data
+        )
+        os.makedirs(self.path_hpo_name_data_directory, exist_ok=True)
+
     def cv(
         self,
         lora_r=8,
@@ -118,7 +125,7 @@ class CrossValidation(LLM):
 def objective(trial: optuna.trial.Trial):
 
     # suggest the parameters with search space
-    lora_r = trial.suggest_int("lora_r", low=4, high=32, step=1)
+    lora_r = trial.suggest_int("lora_r", low=4, high=256, step=1)
     lora_alpha = trial.suggest_int("lora_alpha", low=4, high=128, step=1)
     lora_dropout = trial.suggest_float("lora_dropout", low=0.05, high=1, step=0.01)
     normalize = trial.suggest_categorical("normalize", choices=[True, False])
@@ -190,7 +197,7 @@ if __name__ == "__main__":
     seed = 1998
     n_trials = 100
     extracted_label = None if name_data == "HST" else [0, 1, 4, 5]
-    downsampling_n_instances = 30 if name_data == "HST" else None
+    downsampling_n_instances = 300 if name_data == "HST" else None
     downsampling_n_instances_train = 400 if name_data == "TEP" else None
     downsampling_n_instances_test = 160 if name_data == "TEP" else None
     quantized = True
@@ -198,7 +205,7 @@ if __name__ == "__main__":
     gradient_accumulation_steps = 1
     max_new_tokens = 5
     save_model = False
-    epochs = 3
+    epochs = 20
     n_splits = 5
     seed = 1998
     save_data = False
@@ -206,14 +213,14 @@ if __name__ == "__main__":
 
     # path to sqlite database
     path_models_directory = os.path.dirname(os.path.abspath(__file__))
-    path_hpo_directory = os.path.join(path_models_directory, "hpo")
-    os.makedirs(path_hpo_directory, exist_ok=True)
+    path_hpo_name_data_directory = os.path.join(path_models_directory, "hpo", name_data)
+    os.makedirs(path_hpo_name_data_directory, exist_ok=True)
     db_hpo = "hpo.db"
-    path_db_hpo = os.path.join(path_hpo_directory, db_hpo)
+    path_db_hpo = os.path.join(path_hpo_name_data_directory, db_hpo)
     db_hpo_sqlite = f"sqlite:///{path_db_hpo}"
 
     # path csv optuna
-    path_csv_hpo = os.path.join(path_hpo_directory, f"hpo_{name_data}.csv")
+    path_csv_hpo = os.path.join(path_hpo_name_data_directory, f"hpo_{name_data}.csv")
 
     # sampler and pruner in optuna
     sampler = optuna.samplers.TPESampler(seed=seed)
@@ -234,11 +241,14 @@ if __name__ == "__main__":
     df_trials = study.trials_dataframe()
     df_trials.to_csv(path_csv_hpo, index=False)
 
-    # run trials if current trials < n_trials
-    if len(study.trials) < n_trials:
+    # run trials if number of successed trials < n_trials
+    complete_trials = study.get_trials(
+        deepcopy=False, states=[optuna.trial.TrialState.COMPLETE]
+    )
+    if len(complete_trials) < n_trials:
 
         # check if the last trial is failed
-        if len(study.trials) > 0 and study.trials[-1].state in [
+        if len(complete_trials) > 0 and study.trials[-1].state in [
             optuna.trial.TrialState.FAIL,
             optuna.trial.TrialState.RUNNING,
         ]:
@@ -246,11 +256,7 @@ if __name__ == "__main__":
             study.enqueue_trial(failed_trial_params)
 
         # run trials
-        study.optimize(
-            objective,
-            n_trials=n_trials,
-            show_progress_bar=True,
-        )
+        study.optimize(objective, n_trials=n_trials)
 
     else:
         pruned_trials = study.get_trials(
