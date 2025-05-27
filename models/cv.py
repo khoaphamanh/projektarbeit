@@ -179,6 +179,7 @@ if __name__ == "__main__":
         type=str,
         help="choose data name between 'HST' or 'TEP', default is 'HST'",
         choices=["HST", "TEP"],
+        default="HST",
     )
 
     args = parser.parse_args()
