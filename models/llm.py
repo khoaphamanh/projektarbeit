@@ -2,24 +2,19 @@ from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
     BitsAndBytesConfig,
-    HfArgumentParser,
     TrainingArguments,
-    pipeline,
-    logging,
     TrainerCallback,
     TrainerControl,
     TrainerState,
-    Trainer,
 )
 from sklearn.utils import check_random_state
 import transformers
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig
 from trl import SFTTrainer
 import sys
 import os
 import torch
 from sklearn.metrics import accuracy_score
-from tqdm import tqdm
 from torch.utils.data import DataLoader
 from timeit import default_timer
 import random

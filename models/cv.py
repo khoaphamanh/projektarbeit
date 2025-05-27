@@ -3,10 +3,7 @@ import optuna
 import os
 from sklearn.model_selection import StratifiedKFold
 import numpy as np
-import wandb
 import argparse
-import gc
-import torch
 
 # Set environment variable before torch is imported
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
@@ -229,7 +226,7 @@ if __name__ == "__main__":
 
     # create or load a exist study
     study = optuna.create_study(
-        direction="maximize",
+        direction="minimize",
         study_name=study_name,
         storage=db_hpo_sqlite,
         load_if_exists=True,
@@ -243,7 +240,8 @@ if __name__ == "__main__":
 
     # run trials if number of successed trials < n_trials
     complete_trials = study.get_trials(
-        deepcopy=False, states=[optuna.trial.TrialState.COMPLETE]
+        deepcopy=False,
+        states=[optuna.trial.TrialState.COMPLETE, optuna.trial.TrialState.PRUNED],
     )
     if len(complete_trials) < n_trials:
 
@@ -307,7 +305,7 @@ if __name__ == "__main__":
             epochs=epochs,
             trial=None,
             n_splits=None,
-            index_trial=None,
+            index_split=None,
             hpo=False,
         )
 
