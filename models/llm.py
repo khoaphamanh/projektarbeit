@@ -87,12 +87,12 @@ class LLM(DataPreprocessing):
             model = AutoModelForCausalLM.from_pretrained(
                 self.name_model_llama_2,
                 quantization_config=bnb_config,
-                #     device_map=self.device_map,
+                device_map=self.device_map,
             )
         else:
             model = AutoModelForCausalLM.from_pretrained(
                 self.name_model_llama_2,
-                # device_map=self.device_map,
+                device_map=self.device_map,
             )
 
         # load model to device
