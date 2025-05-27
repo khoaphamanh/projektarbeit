@@ -857,27 +857,28 @@ class MetricsCallback(TrainerCallback):
                 raise optuna.exceptions.TrialPruned()
 
 
+def set_random_seed(seed=42):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    transformers.set_seed(seed)
+    check_random_state(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)  # Set CUDA seed
+        torch.cuda.manual_seed_all(seed)  # If multi-GPU, set for all GPUs
+        torch.backends.cudnn.deterministic = True  # Ensure deterministic behavior
+        torch.backends.cudnn.benchmark = (
+            False  # Disable CUDNN benchmarking for reproducibility
+        )
+
+
 # run this script
 if __name__ == "__main__":
 
+    # set random seed
     seed = 1998
-
-    def set_random_seed(seed=42):
-        random.seed(seed)
-        np.random.seed(seed)
-        torch.manual_seed(seed)
-        torch.cuda.manual_seed(seed)
-        torch.cuda.manual_seed_all(seed)
-        transformers.set_seed(seed)
-        check_random_state(seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed(seed)  # Set CUDA seed
-            torch.cuda.manual_seed_all(seed)  # If multi-GPU, set for all GPUs
-            torch.backends.cudnn.deterministic = True  # Ensure deterministic behavior
-            torch.backends.cudnn.benchmark = (
-                False  # Disable CUDNN benchmarking for reproducibility
-            )
-
     set_random_seed(seed=seed)
 
     # init tep
