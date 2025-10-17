@@ -2,29 +2,29 @@
 In this project, we will use large language models (LLMs) for classification tasks in the field of predictive maintenance. The project is inspired by and based on the paper [Empirical study on fine-tuning pre-trained large language models for fault diagnosis of complex systems](https://www.sciencedirect.com/science/article/abs/pii/S095183202400454X) [1].
 
 ## Datasets
-Dữ liệu mà chúng tôi sử dụng trong công việc này có dạng bảng. Mỗi dòng tương ứng với một instance và sẽ có số cột tương ứng với features. Chúng tôi sử dụng hai tập dữ liệu trong công việc này
+The data used in this work is tabular. Each row corresponds to an instance, and the columns store the associated features. We rely on two datasets in this project.
 
 ### High speed train breaking system
-High speed train (HST) breaking system là dữ liệu dạng bảng bao gồm 22368 instances, có tổng cộng 46 features với 15 continous features và 31 categorical features. Chỉ có 2 labels là 0 (normal) và 1 (anomaly). Dữ liệu là không cân bằng với 21979 instance có label 0 và chỉ 389 instance có label 1. Dữ liệu gốc ở link này https://www2.ie.tsinghua.edu.cn/rrml/Resources.html . Cần lưu ý rằng, người dùng không cần phải download dữ liệu xuống một cách thủ công, khi chạy code, dữ liệu sẽ tự động được download xuống. 
+The High Speed Train (HST) braking system dataset contains 22,368 tabular instances with 46 features in total: 15 continuous and 31 categorical. It has two labels, 0 (normal) and 1 (anomaly), and is highly imbalanced with 21,979 normal instances and only 389 anomalous ones. The original data can be downloaded from this [link](https://www2.ie.tsinghua.edu.cn/rrml/Resources.html), but the training scripts fetch it automatically so no manual download is required.
 
 ### Tennessee Eastman Process (TEP) Dataset
-Tennessee Eastman Process (TEP) Dataset là tập dữ liệu dạng bảng. Trong dữ liệu này, có tổng cộng 21 labels, với label 0 là normal, và 20 lỗi còn lại từ label 1 tới 20. Trong dữ liệu train data, mỗi label có 250000 instance, còn trong dữ liệu test, mỗi label sẽ có 480000. Dữ liệu này cân bằng và features có tên.
+The Tennessee Eastman Process (TEP) dataset is also tabular. It provides 21 labels in total, where label 0 denotes normal operation and labels 1 through 20 represent different faults. The training split contains 250,000 instances per label, while the test split offers 480,000 instances per label. This dataset is balanced and the features are explicitly named.The original data can be downloaded from this [link](https://www.kaggle.com/datasets/averkij/tennessee-eastman-process-simulation-dataset?resource=download)
 
 ## Preprocessing
 ### Downsampling
-Do cả 2 dữ liệu này đều khá lớn trong việc huấn luyện LLM do đó chúng tôi đã giảm dữ liệu xuống để làm cho việc huấn luyện mô hình trở nên nhanh hơn. HST sẽ giảm chỉ còn 240 instances cho train data và 60 instances cho test data. Tỉ lệ label là cân bằng. TEP sẽ giảm còn 400 instances cho train data và 160 instances cho test data. Chúng tôi chỉ dùng label 0,1,4,5 và tỉ lệ cho mỗi label là cân bằng. Chúng tôi downsampling theo paper [1].
+Both datasets are large for LLM training, so we downsampled them to speed up experiments. For HST we keep 240 training instances and 60 test instances with balanced labels. For TEP we retain 400 training instances and 160 test instances, using only labels 0, 1, 4, and 5 in a balanced manner. This downsampling strategy follows paper [1].
 
 ### Normalization
-Chúng tôi sẽ chuẩn hóa dữ liệu theo kiểu Standardize.
+We standardize the features using z-score normalization.
 
 ### Convert to Text
 #### Tabular to Text
-Do sử dụng LLM trong công việc này, do đó chúng tôi sẽ chuyển dữ liệu bảng sang dạng text. ví dụ nếu tôi có một instance
+Because we work with an LLM, we convert each tabular instance into text. For example, if we have the instance
 | setting_1 | setting_2 | condition | sensor_1 | sensor_2 | label |
 |------------|------------|------------|-----------|-----------|--------|
 | 1 | 1 | 2 | 0.05 | 0.7 | 1 |
 
-thì khi chuyển sang text sẽ là
+the textual representation becomes
 
 **Question:**  
 Tell me if the value of Y is 0 or 1. If feature setting_1 = 1, feature setting_2 = 1, feature condition = 2, feature sensor_1 = 0.05, feature sensor_2 = 0.7. What should be Y?  
@@ -33,7 +33,7 @@ Tell me if the value of Y is 0 or 1. If feature setting_1 = 1, feature setting_2
 Y = 0
 
 #### System behavior
-không chi chuyển sang text, chúng ta còn phải sử dụng đúng template của LLM mà chúng tôi sẽ sử dụng LLaMA 2, do đó chúng tôi sẽ phải sử dụng cú pháp của mô hình này:
+Beyond converting to text, we must follow the template expected by the LLaMA 2 model, so the prompts need to respect its syntax:
 ```
 <s>[INST] <<SYS>>
 System prompt
@@ -58,11 +58,11 @@ Tell me if the value of Y is 0 or 1. If feature setting_1 = 1, feature setting_2
 ```
 
 ## Model Selection
-Trong công việc này, chúng tôi sử dụng [LLaMA 2](https://arxiv.org/abs/2307.09288) [2] để huấn luyện mô hình theo kiểu supervised learning. Túc là chúng tôi kỳ vọng ouput của mô hình sẽ có độ dài 5 tokens, bao gồm 2 tokens $[/INST]$ và $</s>$ và Y = label. 
-Tuy nhiên do mô hình này quá lớn, chúng tôi sẽ sử dụng [Quantized Low rank adapation](https://arxiv.org/abs/2305.14314) (Q-LoRA) [3] để huấn luyện một phần của mô hình. chúng tôi áp dụng lora cho tất cả các layers có trong model
+In this work we fine-tune [LLaMA 2](https://arxiv.org/abs/2307.09288) [2] in a supervised setting. We expect the model output to contain five tokens in total—two structural tokens ($[/INST]$ and $</s>$) plus the label token `Y`.
+However, the full model is too large to fine-tune directly, so we adopt [Quantized Low-Rank Adaptation](https://arxiv.org/abs/2305.14314) (Q-LoRA) [3] to update only a subset of parameters. We attach LoRA adapters to every layer in the network.
 
 ## Hyperparameter Optimization Tunning
-Trong công việc này, chúng tôi sử dụng loss trong tập dữ liệu validation để làm objective function để lựa chọn hyperarameters tốt nhất. Những hyperparameters mà chúng tôi tune là:
+We use the loss on the validation set as the objective function for selecting the best hyperparameters. The search covers:
 
 lora_r: dimension of trainable matrix
 
@@ -75,7 +75,7 @@ normalize: should the input normalize with standardize
 learning_rate: learning rate of the model
 
 ## Result
-Trong dự án này, không chỉ huấn luyện LLM, mà chúng tôi còn so sánh với các mô hình Machine Learning khác
+In this project we not only fine-tune an LLM but also compare it with other machine learning models
 
 ##### Table 4.1: Best hyperparameters and metrics
 
@@ -178,4 +178,5 @@ Otherwise, if the only goal is to predict labels from tabular data, then tree-ba
 
 ## Reference
 [1] Shuwen Zheng, Kai Pan, Jie Liu, and Yunxia Chen. Empirical study on fine-tuning pre-trained large language models for fault diagnosis of complex systems. *Reliability Engineering & System Safety*, 252:110382, 2024.
-
+[2] Hugo Touvron, Louis Martin, Kevin Stone, Peter Albert, Amjad Almahairi, Yasmine Babaei, Nikolay Bashlykov, Soumya Batra, Prajjwal Bhargava, Shruti Bhosale, et al. Llama 2: Open foundation and fine-tuned chat models. arXiv preprint arXiv:2307.09288, 2023.
+[3] Tim Dettmers, Artidoro Pagnoni, Ari Holtzman, and Luke Zettlemoyer. QLoRA: Efficient finetuning of quantized LLMs. arXiv preprint arXiv:2305.14314, 2023.
